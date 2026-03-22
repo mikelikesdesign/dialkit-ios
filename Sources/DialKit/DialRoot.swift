@@ -6,36 +6,10 @@ public enum DialPosition: String, CaseIterable {
     case topLeft
     case bottomRight
     case bottomLeft
-
-    fileprivate var alignment: Alignment {
-        switch self {
-        case .topRight:
-            return .topTrailing
-        case .topLeft:
-            return .topLeading
-        case .bottomRight:
-            return .bottomTrailing
-        case .bottomLeft:
-            return .bottomLeading
-        }
-    }
-
-    fileprivate var insets: EdgeInsets {
-        switch self {
-        case .topRight:
-            return EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16)
-        case .topLeft:
-            return EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16)
-        case .bottomRight:
-            return EdgeInsets(top: 16, leading: 16, bottom: 32, trailing: 16)
-        case .bottomLeft:
-            return EdgeInsets(top: 16, leading: 16, bottom: 32, trailing: 16)
-        }
-    }
 }
 
 public enum DialMode: String, CaseIterable {
-    case popover
+    case drawer
     case inline
 }
 
@@ -44,15 +18,18 @@ public struct DialRoot: View {
     private let position: DialPosition
     private let defaultOpen: Bool
     private let mode: DialMode
+    private let storageID: String
 
     public init(
-        position: DialPosition = .topRight,
-        defaultOpen: Bool = true,
-        mode: DialMode = .popover
+        position: DialPosition = .bottomRight,
+        defaultOpen: Bool = false,
+        mode: DialMode = .drawer,
+        storageID: String = "default"
     ) {
         self.position = position
         self.defaultOpen = defaultOpen
         self.mode = mode
+        self.storageID = storageID
         self._store = ObservedObject(wrappedValue: DialStore.shared)
     }
 
@@ -67,19 +44,7 @@ public struct DialRoot: View {
                     }
                 }
             } else {
-                GeometryReader { _ in
-                    Color.clear
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .overlay(alignment: position.alignment) {
-                            VStack(alignment: .leading, spacing: 12) {
-                                ForEach(store.panels) { panel in
-                                    DialPanelContainer(panel: panel, defaultOpen: defaultOpen, inline: false)
-                                }
-                            }
-                            .padding(position.insets)
-                        }
-                        .ignoresSafeArea()
-                }
+                DialDrawerHost(store: store, position: position, defaultOpen: defaultOpen, storageID: storageID)
             }
         }
     }

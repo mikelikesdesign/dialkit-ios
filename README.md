@@ -21,8 +21,6 @@ This package is a forked Swift package adaptation of Josh Puckett's open source 
 
 Add this repository as a Swift Package dependency in Xcode, then import `DialKit` in your app.
 
-The package exposes a single library product:
-
 ```swift
 import DialKit
 ```
@@ -40,7 +38,7 @@ The typical flow is:
 1. Define a `Model` that contains the values you want to tune.
 2. Create a `DialPanelState<Model>` with an initial value and a list of controls.
 3. Bind your UI directly to `dial.values`.
-4. Add a single `DialRoot` somewhere near the top of your view hierarchy.
+4. Add a single `DialRoot` near the top of your screen hierarchy.
 
 ## Quick Start
 
@@ -83,7 +81,7 @@ struct CardPreview: View {
     )
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack {
             RoundedRectangle(cornerRadius: dial.values.cornerRadius)
                 .fill(dial.values.isEnabled ? .orange : .gray)
                 .overlay {
@@ -92,7 +90,12 @@ struct CardPreview: View {
                 }
                 .padding(40)
 
-            DialRoot(position: .topRight, defaultOpen: true, mode: .popover)
+            DialRoot(
+                position: .bottomRight,
+                defaultOpen: false,
+                mode: .drawer,
+                storageID: "card-preview"
+            )
         }
     }
 }
@@ -103,6 +106,7 @@ A few important details:
 - Keep `DialPanelState` alive for as long as you want the panel to exist. In SwiftUI that usually means `@StateObject`.
 - `dial.values` is the source of truth for the tuned values.
 - You only need one `DialRoot` to render every active panel.
+- In drawer mode, `DialRoot` shows a draggable FAB first and opens a mobile bottom drawer when tapped.
 
 ## Public API Overview
 
@@ -110,9 +114,10 @@ A few important details:
 
 ```swift
 DialRoot(
-    position: .topRight,
-    defaultOpen: true,
-    mode: .popover
+    position: .bottomRight,
+    defaultOpen: false,
+    mode: .drawer,
+    storageID: "default"
 )
 ```
 
@@ -123,12 +128,20 @@ Supported positions:
 - `.bottomRight`
 - `.bottomLeft`
 
+In drawer mode, `position` is the initial FAB anchor, not a panel alignment.
+
 Supported modes:
 
-- `.popover`: floating corner panel
+- `.drawer`: draggable FAB + mobile bottom drawer
 - `.inline`: always-expanded panel rendered in place
 
-Use `popover` when you want a floating inspector. Use `inline` when you want the controls embedded directly in your layout.
+Drawer behavior:
+
+- `defaultOpen: false` starts closed with only the FAB visible
+- `defaultOpen: true` starts with the drawer open at the medium height
+- `storageID` namespaces the persisted FAB position so different screens do not collide
+
+`drawer` mode is currently iPhone-first. A dedicated iPad presentation is deferred for now.
 
 ### `DialPanelState<Model>`
 
@@ -188,7 +201,7 @@ Paths are also used to generate stable action identifiers. A nested action insid
 
 ## Working With Multiple Panels
 
-Multiple panel states can exist at the same time. They automatically register with the shared `DialStore`, and `DialRoot` will render all of them.
+Multiple panel states can exist at the same time. They automatically register with the shared `DialStore`.
 
 ```swift
 struct MultiPreview: View {
@@ -205,15 +218,15 @@ struct MultiPreview: View {
     )
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack {
             PreviewSurface(card: cardDial.values, shadow: shadowDial.values)
-            DialRoot(position: .topRight, defaultOpen: true, mode: .popover)
+            DialRoot(storageID: "multi-preview")
         }
     }
 }
 ```
 
-You do not create a separate `DialRoot` per panel. Usually one root is enough for the whole screen.
+Drawer mode uses one shared drawer. If multiple panels are active, DialKit shows a picker in the drawer header and renders the selected panel. Inline mode renders all active panels in place.
 
 ## Presets, Base State, and Copy
 
@@ -320,7 +333,8 @@ When you reconfigure a panel:
 
 ## Tips
 
-- Add `DialRoot` close to the top of your screen so the popover has room to overlay your content.
+- Add `DialRoot` close to the top of your screen hierarchy so the FAB and drawer can overlay your content.
+- Use a unique `storageID` per screen if you want each screen to remember its own FAB position.
 - Use `inline` mode for settings screens, inspectors, or debug panels that should always stay visible.
 - Keep your model small and focused. DialKit works best when each panel represents a coherent group of values.
 - Prefer stable path names because they become labels, nested control identifiers, and action paths.
@@ -329,6 +343,7 @@ When you reconfigure a panel:
 
 - The package is still a work in progress.
 - Presets are in-memory only. Persistence is up to the host app.
+- Drawer mode is currently iPhone-first. A dedicated iPad presentation has not been added yet.
 - The API is intentionally package-first right now; an example app is not bundled yet.
 - Color values are stored as hex strings rather than `Color` values.
 
@@ -336,6 +351,7 @@ When you reconfigure a panel:
 
 - Config-driven controls keyed by writable key paths into your model
 - Shared global store for multiple panels
+- Draggable FAB with persisted position per `storageID`
+- Mobile drawer presentation plus inline presentation
 - Presets with base-state restore and active-preset autosave
 - Nested groups, spring controls, transition controls, actions, text, toggle, color, select, and slider controls
-- `popover` and `inline` presentation modes

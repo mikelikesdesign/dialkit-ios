@@ -41,19 +41,415 @@ private extension DialTransitionMode {
     }
 }
 
-struct DialPanelContainer: View {
-    @ObservedObject var panel: AnyDialPanelBox
-    let defaultOpen: Bool
-    let inline: Bool
+package enum DialDrawerPresentation: Equatable {
+    case hidden
+    case medium
+    case tall
 
-    @State private var isOpen: Bool
+    var isExpanded: Bool {
+        self != .hidden
+    }
+}
+
+package enum DialFABStorage {
+    private struct StoredPoint: Codable {
+        let x: Double
+        let y: Double
+    }
+
+    package static func key(for storageID: String) -> String {
+        "DialKit.fab-position.\(storageID)"
+    }
+
+    package static func load(storageID: String, userDefaults: UserDefaults = .standard) -> CGPoint? {
+        guard let data = userDefaults.data(forKey: key(for: storageID)),
+              let point = try? JSONDecoder().decode(StoredPoint.self, from: data) else {
+            return nil
+        }
+
+        return CGPoint(x: point.x, y: point.y)
+    }
+
+    package static func save(_ point: CGPoint?, storageID: String, userDefaults: UserDefaults = .standard) {
+        let storageKey = key(for: storageID)
+        guard let point else {
+            userDefaults.removeObject(forKey: storageKey)
+            return
+        }
+
+        let stored = StoredPoint(x: point.x, y: point.y)
+        guard let data = try? JSONEncoder().encode(stored) else {
+            return
+        }
+
+        userDefaults.set(data, forKey: storageKey)
+    }
+}
+
+package func dialNextDrawerPresentation(from current: DialDrawerPresentation, translationHeight: CGFloat) -> DialDrawerPresentation {
+    guard abs(translationHeight) > 40 else {
+        return current
+    }
+
+    if translationHeight < 0 {
+        switch current {
+        case .hidden:
+            return .medium
+        case .medium:
+            return .tall
+        case .tall:
+            return .tall
+        }
+    }
+
+    switch current {
+    case .tall:
+        return .medium
+    case .medium:
+        return .hidden
+    case .hidden:
+        return .hidden
+    }
+}
+
+package func dialResolvedPanelSelection(current: UUID?, available: [UUID]) -> UUID? {
+    guard !available.isEmpty else {
+        return nil
+    }
+
+    if let current, available.contains(current) {
+        return current
+    }
+
+    return available.first
+}
+
+#if canImport(UIKit)
+package func dialClampedFABCenter(
+    _ point: CGPoint,
+    in size: CGSize,
+    safeAreaInsets: UIEdgeInsets,
+    diameter: CGFloat,
+    horizontalMargin: CGFloat,
+    topMargin: CGFloat,
+    bottomMargin: CGFloat
+) -> CGPoint {
+    let radius = diameter / 2
+    let minX = radius + horizontalMargin + safeAreaInsets.left
+    let maxX = max(minX, size.width - radius - horizontalMargin - safeAreaInsets.right)
+    let minY = radius + topMargin + safeAreaInsets.top
+    let maxY = max(minY, size.height - radius - bottomMargin - safeAreaInsets.bottom)
+
+    return CGPoint(
+        x: min(max(point.x, minX), maxX),
+        y: min(max(point.y, minY), maxY)
+    )
+}
+
+package func dialDefaultFABCenter(
+    for position: DialPosition,
+    in size: CGSize,
+    safeAreaInsets: UIEdgeInsets,
+    diameter: CGFloat,
+    horizontalMargin: CGFloat,
+    topMargin: CGFloat,
+    bottomMargin: CGFloat
+) -> CGPoint {
+    let radius = diameter / 2
+    let minX = radius + horizontalMargin + safeAreaInsets.left
+    let maxX = max(minX, size.width - radius - horizontalMargin - safeAreaInsets.right)
+    let minY = radius + topMargin + safeAreaInsets.top
+    let maxY = max(minY, size.height - radius - bottomMargin - safeAreaInsets.bottom)
+
+    switch position {
+    case .topRight:
+        return CGPoint(x: maxX, y: minY)
+    case .topLeft:
+        return CGPoint(x: minX, y: minY)
+    case .bottomRight:
+        return CGPoint(x: maxX, y: maxY)
+    case .bottomLeft:
+        return CGPoint(x: minX, y: maxY)
+    }
+}
+#endif
+
+struct DialDrawerHost: View {
+    @ObservedObject private var store: DialStore
+    let position: DialPosition
+    let defaultOpen: Bool
+    let storageID: String
+
+    @State private var drawerPresentation: DialDrawerPresentation
+    @State private var drawerVisualPresentation: DialDrawerPresentation
+    @State private var showsDrawerOverlay: Bool
+    @State private var selectedPanelID: UUID?
+    @State private var fabPosition: CGPoint?
+
+    init(store: DialStore, position: DialPosition, defaultOpen: Bool, storageID: String) {
+        self._store = ObservedObject(wrappedValue: store)
+        self.position = position
+        self.defaultOpen = defaultOpen
+        self.storageID = storageID
+        self._drawerPresentation = State(initialValue: defaultOpen ? .medium : .hidden)
+        self._drawerVisualPresentation = State(initialValue: .medium)
+        self._showsDrawerOverlay = State(initialValue: defaultOpen)
+        self._selectedPanelID = State(initialValue: nil)
+        self._fabPosition = State(initialValue: DialFABStorage.load(storageID: storageID))
+    }
+
+    private var activePanel: AnyDialPanelBox? {
+        let resolvedID = dialResolvedPanelSelection(current: selectedPanelID, available: store.panels.map(\.id))
+        return store.panels.first(where: { $0.id == resolvedID }) ?? store.panels.first
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                if showsDrawerOverlay, let activePanel {
+                    ZStack(alignment: .bottom) {
+                        if drawerPresentation.isExpanded {
+                            Color.black.opacity(0.001)
+                                .ignoresSafeArea()
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    hideDrawer()
+                                }
+                        }
+
+                        DialDrawerPanel(
+                            panel: activePanel,
+                            panels: store.panels,
+                            selectedPanelID: $selectedPanelID,
+                            presentation: activeDrawerPresentation,
+                            containerSize: proxy.size,
+                            safeAreaInsets: proxy.safeAreaInsets,
+                            onClose: hideDrawer,
+                            onDrag: handleDrawerDrag
+                        )
+                        .padding(.horizontal, 8)
+                        .offset(y: drawerPresentation == .hidden ? proxy.size.height + 24 : 0)
+                        .allowsHitTesting(drawerPresentation.isExpanded)
+                    }
+                }
+
+                if !showsDrawerOverlay {
+                    ZStack(alignment: .topLeading) {
+                        Color.clear
+                            .allowsHitTesting(false)
+
+                        DraggableFABOverlay(
+                            containerSize: proxy.size,
+                            safeAreaInsets: proxy.safeAreaInsets.uiEdgeInsets,
+                            initialPosition: position,
+                            position: $fabPosition,
+                            action: { presentDrawer(.medium) }
+                        )
+                    }
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
+        }
+        .onAppear {
+            selectedPanelID = dialResolvedPanelSelection(current: selectedPanelID, available: store.panels.map(\.id))
+        }
+        .onChange(of: store.panels.map(\.id)) { _, ids in
+            selectedPanelID = dialResolvedPanelSelection(current: selectedPanelID, available: ids)
+        }
+        .onChange(of: fabPosition) { _, newValue in
+            DialFABStorage.save(newValue, storageID: storageID)
+        }
+    }
+
+    private var activeDrawerPresentation: DialDrawerPresentation {
+        drawerPresentation == .hidden ? drawerVisualPresentation : drawerPresentation
+    }
+
+    private func handleDrawerDrag(_ translationHeight: CGFloat) {
+        let target = dialNextDrawerPresentation(from: drawerPresentation, translationHeight: translationHeight)
+        guard target != drawerPresentation else {
+            return
+        }
+
+        if target == .hidden {
+            hideDrawer()
+        } else {
+            presentDrawer(target)
+        }
+    }
+
+    private func presentDrawer(_ target: DialDrawerPresentation) {
+        if !showsDrawerOverlay {
+            drawerVisualPresentation = target
+            drawerPresentation = .hidden
+            withAnimation(fabAppearanceAnimation) {
+                showsDrawerOverlay = true
+            }
+
+            DispatchQueue.main.async {
+                withAnimation(drawerAnimation) {
+                    drawerVisualPresentation = target
+                    drawerPresentation = target
+                }
+            }
+            return
+        }
+
+        withAnimation(drawerAnimation) {
+            drawerVisualPresentation = target
+            drawerPresentation = target
+        }
+    }
+
+    private func hideDrawer() {
+        drawerVisualPresentation = activeDrawerPresentation
+
+        withAnimation(drawerAnimation) {
+            drawerPresentation = .hidden
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
+            if drawerPresentation == .hidden {
+                withAnimation(fabAppearanceAnimation) {
+                    showsDrawerOverlay = false
+                }
+            }
+        }
+    }
+
+    private var drawerAnimation: Animation {
+        .spring(response: 0.32, dampingFraction: 0.86)
+    }
+
+    private var fabAppearanceAnimation: Animation {
+        .spring(response: 0.22, dampingFraction: 0.9)
+    }
+}
+
+private struct DialDrawerPanel: View {
+    @ObservedObject var panel: AnyDialPanelBox
+    let panels: [AnyDialPanelBox]
+    @Binding var selectedPanelID: UUID?
+    let presentation: DialDrawerPresentation
+    let containerSize: CGSize
+    let safeAreaInsets: EdgeInsets
+    let onClose: () -> Void
+    let onDrag: (CGFloat) -> Void
+
+    var body: some View {
+        let width = max(containerSize.width - 32, 0)
+        let mediumHeight = min(containerSize.height * 0.58, 560)
+        let tallHeight = min(containerSize.height * 0.90, containerSize.height - 12)
+
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: onClose) {
+                Capsule()
+                    .fill(Color.white.opacity(0.22))
+                    .frame(width: 42, height: 5)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 10)
+                    .padding(.bottom, 12)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            header
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+
+            DialPanelControlsView(panel: panel, contentBottomPadding: max(safeAreaInsets.bottom, 20))
+        }
+        .frame(width: width)
+        .frame(height: panelHeight(medium: mediumHeight, tall: tallHeight), alignment: .top)
+        .padding(.horizontal, 12)
+        .padding(.bottom, max(safeAreaInsets.bottom, 12))
+        .background {
+            DialPanelBackground(cornerRadius: 24)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(DialTheme.border, lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: DialTheme.shadow, radius: 32, y: 8)
+        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .gesture(
+            DragGesture(minimumDistance: 16)
+                .onEnded { gesture in
+                    onDrag(gesture.translation.height)
+                }
+        )
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            if panels.count > 1 {
+                Menu {
+                    ForEach(panels) { candidate in
+                        Button(candidate.name) {
+                            selectedPanelID = candidate.id
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(panel.name)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(DialTheme.textRoot)
+                            .lineLimit(1)
+
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(DialTheme.textLabel.opacity(0.8))
+                    }
+                    .frame(height: 32)
+                    .padding(.horizontal, 10)
+                    .background(DialRowBackground(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text(panel.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DialTheme.textRoot)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(DialTheme.textLabel)
+                    .frame(width: 24, height: 24)
+                    .background(DialRowBackground(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func panelHeight(medium: Double, tall: Double) -> Double {
+        switch presentation {
+        case .hidden:
+            return 0
+        case .medium:
+            return medium
+        case .tall:
+            return tall
+        }
+    }
+}
+
+private struct DialPanelControlsView: View {
+    @ObservedObject var panel: AnyDialPanelBox
+    let contentBottomPadding: CGFloat
+
     @State private var copiedState = false
 
-    init(panel: AnyDialPanelBox, defaultOpen: Bool, inline: Bool) {
+    init(panel: AnyDialPanelBox, contentBottomPadding: CGFloat = 12) {
         self.panel = panel
-        self.defaultOpen = defaultOpen
-        self.inline = inline
-        self._isOpen = State(initialValue: inline || defaultOpen)
+        self.contentBottomPadding = contentBottomPadding
     }
 
     private var activePresetName: String {
@@ -61,48 +457,7 @@ struct DialPanelContainer: View {
     }
 
     var body: some View {
-        Group {
-            if inline {
-                expandedPanel
-            } else if isOpen {
-                expandedPanel
-                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topTrailing)))
-            } else {
-                collapsedButton
-                    .transition(.opacity)
-            }
-        }
-        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: isOpen)
-    }
-
-    private var collapsedButton: some View {
-        Button {
-            isOpen = true
-        } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(DialTheme.textRoot)
-                .frame(width: 42, height: 42)
-                .background(
-                    Circle()
-                        .fill(DialTheme.panelBackground)
-                )
-                .overlay {
-                    Circle()
-                        .stroke(DialTheme.border, lineWidth: 1)
-                }
-                .shadow(color: DialTheme.shadow, radius: 18, y: 6)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var expandedPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-
             toolbar
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
@@ -114,41 +469,7 @@ struct DialPanelContainer: View {
                     }
                 }
                 .padding(.horizontal, 12)
-                .padding(.bottom, 12)
-            }
-        }
-        .frame(width: 280)
-        .background {
-            DialPanelBackground(cornerRadius: 16)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(DialTheme.border, lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: DialTheme.shadow, radius: 22, y: 8)
-    }
-
-    private var header: some View {
-        HStack(spacing: 12) {
-            Text(panel.name)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(DialTheme.textRoot)
-                .lineLimit(1)
-
-            Spacer(minLength: 0)
-
-            if !inline {
-                Button {
-                    isOpen = false
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(DialTheme.textLabel)
-                        .frame(width: 24, height: 24)
-                        .background(DialRowBackground(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
+                .padding(.bottom, contentBottomPadding)
             }
         }
     }
@@ -226,7 +547,6 @@ struct DialPanelContainer: View {
         }
     }
 
-
     private func controlView(_ control: DialResolvedControl) -> AnyView {
         switch control.kind {
         case let .slider(slider):
@@ -256,6 +576,351 @@ struct DialPanelContainer: View {
         }
     }
 }
+
+struct DialPanelContainer: View {
+    @ObservedObject var panel: AnyDialPanelBox
+    let defaultOpen: Bool
+    let inline: Bool
+
+    @State private var isOpen: Bool
+
+    init(panel: AnyDialPanelBox, defaultOpen: Bool, inline: Bool) {
+        self.panel = panel
+        self.defaultOpen = defaultOpen
+        self.inline = inline
+        self._isOpen = State(initialValue: inline || defaultOpen)
+    }
+
+    var body: some View {
+        Group {
+            if inline {
+                expandedPanel
+            } else if isOpen {
+                expandedPanel
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topTrailing)))
+            } else {
+                collapsedButton
+                    .transition(.opacity)
+            }
+        }
+        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: isOpen)
+    }
+
+    private var collapsedButton: some View {
+        Button {
+            isOpen = true
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(DialTheme.textRoot)
+                .frame(width: 42, height: 42)
+                .background(
+                    Circle()
+                        .fill(DialTheme.panelBackground)
+                )
+                .overlay {
+                    Circle()
+                        .stroke(DialTheme.border, lineWidth: 1)
+                }
+                .shadow(color: DialTheme.shadow, radius: 18, y: 6)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var expandedPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+            DialPanelControlsView(panel: panel)
+        }
+        .frame(width: 280)
+        .background {
+            DialPanelBackground(cornerRadius: 16)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(DialTheme.border, lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: DialTheme.shadow, radius: 22, y: 8)
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Text(panel.name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(DialTheme.textRoot)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            if !inline {
+                Button {
+                    isOpen = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(DialTheme.textLabel)
+                        .frame(width: 24, height: 24)
+                        .background(DialRowBackground(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+private struct DialRowBackground: View {
+    var cornerRadius: CGFloat = 8
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(DialTheme.surface)
+    }
+}
+
+private struct DialPanelBackground: View {
+    var cornerRadius: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(DialTheme.panelBackground.opacity(0.94))
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial.opacity(0.45))
+            )
+    }
+}
+
+private extension EdgeInsets {
+    #if canImport(UIKit)
+    var uiEdgeInsets: UIEdgeInsets {
+        UIEdgeInsets(top: top, left: leading, bottom: bottom, right: trailing)
+    }
+    #endif
+}
+
+#if canImport(UIKit)
+private struct DraggableFABOverlay: UIViewRepresentable {
+    let containerSize: CGSize
+    let safeAreaInsets: UIEdgeInsets
+    let initialPosition: DialPosition
+    @Binding var position: CGPoint?
+    let action: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(position: $position, initialPosition: initialPosition, action: action)
+    }
+
+    func makeUIView(context: Context) -> FABContainerView {
+        let view = FABContainerView()
+        view.backgroundColor = .clear
+
+        let fabView = context.coordinator.makeFABView()
+        view.fabView = fabView
+        view.addSubview(fabView)
+
+        context.coordinator.containerView = view
+        context.coordinator.fabView = fabView
+        return view
+    }
+
+    func updateUIView(_ uiView: FABContainerView, context: Context) {
+        let effectiveSize = uiView.bounds.size == .zero ? containerSize : uiView.bounds.size
+        context.coordinator.containerSize = effectiveSize == .zero ? containerSize : effectiveSize
+        context.coordinator.safeAreaInsets = safeAreaInsets
+        context.coordinator.initialPosition = initialPosition
+        context.coordinator.updateLayout()
+    }
+
+    final class Coordinator: NSObject {
+        private let diameter: CGFloat = 56
+        private let horizontalMargin: CGFloat = 8
+        private let topMargin: CGFloat = 8
+        private let bottomMargin: CGFloat = 2
+        private let position: Binding<CGPoint?>
+        private let action: () -> Void
+
+        weak var containerView: FABContainerView?
+        weak var fabView: UIView?
+        var containerSize: CGSize = .zero
+        var safeAreaInsets: UIEdgeInsets = .zero
+        var initialPosition: DialPosition
+        private var panStartCenter: CGPoint = .zero
+        private var currentCenter: CGPoint?
+        private var lastContainerSize: CGSize = .zero
+        private var isPanning = false
+
+        init(position: Binding<CGPoint?>, initialPosition: DialPosition, action: @escaping () -> Void) {
+            self.position = position
+            self.initialPosition = initialPosition
+            self.action = action
+        }
+
+        func makeFABView() -> UIView {
+            let fab = UIView(frame: CGRect(x: 0, y: 0, width: diameter, height: diameter))
+            fab.backgroundColor = UIColor(white: 0.13, alpha: 0.96)
+            fab.layer.cornerRadius = diameter / 2
+            fab.layer.cornerCurve = .continuous
+            fab.layer.borderWidth = 1
+            fab.layer.borderColor = UIColor.white.withAlphaComponent(0.10).cgColor
+            fab.layer.shadowColor = UIColor.black.cgColor
+            fab.layer.shadowOpacity = 0.25
+            fab.layer.shadowRadius = 16
+            fab.layer.shadowOffset = CGSize(width: 0, height: 4)
+            fab.layer.shadowPath = UIBezierPath(ovalIn: fab.bounds).cgPath
+
+            let imageView = UIImageView(image: UIImage(systemName: "slider.horizontal.3"))
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            imageView.tintColor = .white
+            imageView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+            fab.addSubview(imageView)
+
+            NSLayoutConstraint.activate([
+                imageView.centerXAnchor.constraint(equalTo: fab.centerXAnchor),
+                imageView.centerYAnchor.constraint(equalTo: fab.centerYAnchor)
+            ])
+
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            tap.require(toFail: pan)
+            fab.addGestureRecognizer(tap)
+            fab.addGestureRecognizer(pan)
+
+            return fab
+        }
+
+        func updateLayout() {
+            guard let fabView else { return }
+            fabView.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
+            fabView.layer.shadowPath = UIBezierPath(ovalIn: fabView.bounds).cgPath
+            let effectiveContainerSize = resolvedContainerSize()
+            containerSize = effectiveContainerSize
+
+            let defaultCenter = dialDefaultFABCenter(
+                for: initialPosition,
+                in: effectiveContainerSize,
+                safeAreaInsets: safeAreaInsets,
+                diameter: diameter,
+                horizontalMargin: horizontalMargin,
+                topMargin: topMargin,
+                bottomMargin: bottomMargin
+            )
+            let targetCenter = dialClampedFABCenter(
+                currentCenter ?? position.wrappedValue ?? defaultCenter,
+                in: effectiveContainerSize,
+                safeAreaInsets: safeAreaInsets,
+                diameter: diameter,
+                horizontalMargin: horizontalMargin,
+                topMargin: topMargin,
+                bottomMargin: bottomMargin
+            )
+            let sizeChanged = lastContainerSize != effectiveContainerSize
+
+            if fabView.center == .zero || sizeChanged || (!isPanning && distance(from: fabView.center, to: targetCenter) > 0.5) {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                fabView.center = targetCenter
+                CATransaction.commit()
+            }
+
+            currentCenter = targetCenter
+            lastContainerSize = effectiveContainerSize
+        }
+
+        @objc private func handleTap() {
+            action()
+        }
+
+        @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard let fabView, let containerView else { return }
+
+            let translation = recognizer.translation(in: containerView)
+            let effectiveContainerSize = resolvedContainerSize(using: containerView)
+            containerSize = effectiveContainerSize
+
+            switch recognizer.state {
+            case .began:
+                isPanning = true
+                panStartCenter = fabView.center
+                currentCenter = fabView.center
+                animateDragging(true, on: fabView)
+
+            case .changed:
+                let nextCenter = dialClampedFABCenter(
+                    CGPoint(x: panStartCenter.x + translation.x, y: panStartCenter.y + translation.y),
+                    in: effectiveContainerSize,
+                    safeAreaInsets: safeAreaInsets,
+                    diameter: diameter,
+                    horizontalMargin: horizontalMargin,
+                    topMargin: topMargin,
+                    bottomMargin: bottomMargin
+                )
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                fabView.center = nextCenter
+                CATransaction.commit()
+                currentCenter = nextCenter
+
+            case .ended, .cancelled, .failed:
+                let finalCenter = dialClampedFABCenter(
+                    CGPoint(x: panStartCenter.x + translation.x, y: panStartCenter.y + translation.y),
+                    in: effectiveContainerSize,
+                    safeAreaInsets: safeAreaInsets,
+                    diameter: diameter,
+                    horizontalMargin: horizontalMargin,
+                    topMargin: topMargin,
+                    bottomMargin: bottomMargin
+                )
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                fabView.center = finalCenter
+                CATransaction.commit()
+                currentCenter = finalCenter
+                isPanning = false
+                DispatchQueue.main.async {
+                    self.position.wrappedValue = finalCenter
+                }
+                animateDragging(false, on: fabView)
+
+            default:
+                break
+            }
+        }
+
+        private func animateDragging(_ dragging: Bool, on view: UIView) {
+            UIView.animate(withDuration: 0.16, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
+                view.transform = dragging ? CGAffineTransform(scaleX: 1.24, y: 1.24) : .identity
+                view.layer.shadowOpacity = dragging ? 0.68 : 0.25
+                view.layer.shadowRadius = dragging ? 28 : 16
+                view.layer.shadowOffset = dragging ? .zero : CGSize(width: 0, height: 4)
+            }
+        }
+
+        private func resolvedContainerSize(using view: UIView? = nil) -> CGSize {
+            let liveSize = view?.bounds.size ?? containerView?.bounds.size ?? .zero
+            return liveSize == .zero ? containerSize : liveSize
+        }
+
+        private func distance(from lhs: CGPoint, to rhs: CGPoint) -> CGFloat {
+            hypot(lhs.x - rhs.x, lhs.y - rhs.y)
+        }
+    }
+}
+
+private final class FABContainerView: UIView {
+    weak var fabView: UIView?
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard let fabView else { return false }
+        let hitFrame = fabView.frame.insetBy(dx: -24, dy: -24)
+        return hitFrame.contains(point)
+    }
+}
+#endif
 
 private struct DialFolderSection<Content: View>: View {
     let title: String
@@ -313,28 +978,6 @@ private struct DialFolderSection<Content: View>: View {
                 .frame(height: 1)
         }
         .padding(.vertical, 4)
-    }
-}
-
-private struct DialRowBackground: View {
-    var cornerRadius: CGFloat = 8
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(DialTheme.surface)
-    }
-}
-
-private struct DialPanelBackground: View {
-    var cornerRadius: CGFloat
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(DialTheme.panelBackground.opacity(0.94))
-            .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(.ultraThinMaterial.opacity(0.45))
-            )
     }
 }
 
