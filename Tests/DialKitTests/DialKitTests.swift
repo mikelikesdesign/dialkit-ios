@@ -73,14 +73,77 @@ final class DialKitTests: XCTestCase {
         XCTAssertEqual(dialNextDrawerPresentation(from: .medium, translationHeight: 10), .medium)
     }
 
-    func testDrawerHelpersMatchPickerAndPaddingRules() {
+    func testDrawerHelpersMatchPickerAndSpacingRules() {
         XCTAssertFalse(dialDrawerShowsPanelPicker(panelCount: 1))
         XCTAssertTrue(dialDrawerShowsPanelPicker(panelCount: 2))
 
-        XCTAssertEqual(dialDrawerChromeBottomPadding, 12)
-        XCTAssertEqual(dialDrawerContentBottomPadding, 20)
-        XCTAssertEqual(dialDrawerExternalBottomInset(for: 0), 0)
-        XCTAssertEqual(dialDrawerExternalBottomInset(for: 34), 34)
+        XCTAssertEqual(dialDrawerContentInset, 12)
+        XCTAssertEqual(dialDrawerToolbarBottomPadding, 6)
+        XCTAssertEqual(dialDrawerChromeHeight(panelCount: 1), 69)
+        XCTAssertEqual(dialDrawerChromeHeight(panelCount: 2), 109)
+    }
+
+    func testResolvedDrawerHeightUsesIntrinsicHeightForShortContent() {
+        let medium = dialResolvedDrawerHeight(
+            presentation: .medium,
+            intrinsicContentHeight: 220,
+            mediumMaxHeight: 360,
+            tallMaxHeight: 620
+        )
+        let tall = dialResolvedDrawerHeight(
+            presentation: .tall,
+            intrinsicContentHeight: 220,
+            mediumMaxHeight: 360,
+            tallMaxHeight: 620
+        )
+
+        XCTAssertEqual(medium, 220)
+        XCTAssertEqual(tall, 220)
+    }
+
+    func testResolvedDrawerHeightClampsMediumOverflow() {
+        XCTAssertEqual(
+            dialResolvedDrawerHeight(
+                presentation: .medium,
+                intrinsicContentHeight: 520,
+                mediumMaxHeight: 360,
+                tallMaxHeight: 620
+            ),
+            360
+        )
+    }
+
+    func testResolvedDrawerHeightClampsTallOverflow() {
+        XCTAssertEqual(
+            dialResolvedDrawerHeight(
+                presentation: .tall,
+                intrinsicContentHeight: 720,
+                mediumMaxHeight: 360,
+                tallMaxHeight: 620
+            ),
+            620
+        )
+    }
+
+    func testDrawerControlsHeightCapSubtractsChromeOnce() {
+        XCTAssertEqual(
+            dialDrawerControlsHeightCap(
+                presentation: .medium,
+                panelCount: 1,
+                mediumMaxHeight: 360,
+                tallMaxHeight: 620
+            ),
+            291
+        )
+        XCTAssertEqual(
+            dialDrawerControlsHeightCap(
+                presentation: .tall,
+                panelCount: 2,
+                mediumMaxHeight: 360,
+                tallMaxHeight: 620
+            ),
+            511
+        )
     }
 
     func testSliderSnappingReturnsSameStepWithinBoundary() {

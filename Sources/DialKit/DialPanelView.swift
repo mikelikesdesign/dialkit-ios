@@ -124,15 +124,69 @@ package func dialResolvedPanelSelection(current: UUID?, available: [UUID]) -> UU
     return available.first
 }
 
-package let dialDrawerChromeBottomPadding: CGFloat = 12
-package let dialDrawerContentBottomPadding: CGFloat = 20
+package let dialDrawerContentInset: CGFloat = 12
+package let dialDrawerToolbarBottomPadding: CGFloat = 6
+
+private let dialDrawerHandleSectionHeight: CGFloat = 27
+private let dialDrawerPanelPickerSectionHeight: CGFloat = 40
+private let dialDrawerToolbarSectionHeight: CGFloat = 42
 
 package func dialDrawerShowsPanelPicker(panelCount: Int) -> Bool {
     panelCount > 1
 }
 
-package func dialDrawerExternalBottomInset(for safeAreaBottom: CGFloat) -> CGFloat {
-    max(safeAreaBottom, 0)
+package func dialDrawerChromeHeight(panelCount: Int) -> CGFloat {
+    dialDrawerHandleSectionHeight
+        + dialDrawerToolbarSectionHeight
+        + (dialDrawerShowsPanelPicker(panelCount: panelCount) ? dialDrawerPanelPickerSectionHeight : 0)
+}
+
+package func dialDrawerHeightCap(
+    presentation: DialDrawerPresentation,
+    mediumMaxHeight: CGFloat,
+    tallMaxHeight: CGFloat
+) -> CGFloat {
+    switch presentation {
+    case .hidden:
+        return 0
+    case .medium:
+        return mediumMaxHeight
+    case .tall:
+        return tallMaxHeight
+    }
+}
+
+package func dialResolvedDrawerHeight(
+    presentation: DialDrawerPresentation,
+    intrinsicContentHeight: CGFloat,
+    mediumMaxHeight: CGFloat,
+    tallMaxHeight: CGFloat
+) -> CGFloat {
+    guard presentation != .hidden else {
+        return 0
+    }
+
+    return min(max(intrinsicContentHeight, 0), dialDrawerHeightCap(
+        presentation: presentation,
+        mediumMaxHeight: mediumMaxHeight,
+        tallMaxHeight: tallMaxHeight
+    ))
+}
+
+package func dialDrawerControlsHeightCap(
+    presentation: DialDrawerPresentation,
+    panelCount: Int,
+    mediumMaxHeight: CGFloat,
+    tallMaxHeight: CGFloat
+) -> CGFloat {
+    max(
+        dialDrawerHeightCap(
+            presentation: presentation,
+            mediumMaxHeight: mediumMaxHeight,
+            tallMaxHeight: tallMaxHeight
+        ) - dialDrawerChromeHeight(panelCount: panelCount),
+        0
+    )
 }
 
 package func dialSnappedSliderValue(_ raw: Double, range: ClosedRange<Double>, step: Double) -> Double {
@@ -246,7 +300,6 @@ struct DialDrawerHost: View {
                             selectedPanelID: $selectedPanelID,
                             presentation: activeDrawerPresentation,
                             containerSize: proxy.size,
-                            safeAreaInsets: proxy.safeAreaInsets,
                             onDrag: handleDrawerDrag
                         )
                         .padding(.horizontal, 8)
@@ -357,13 +410,32 @@ private struct DialDrawerPanel: View {
     @Binding var selectedPanelID: UUID?
     let presentation: DialDrawerPresentation
     let containerSize: CGSize
-    let safeAreaInsets: EdgeInsets
     let onDrag: (CGFloat) -> Void
+
+    @State private var measuredControlsContentHeight: CGFloat = 0
 
     var body: some View {
         let width = max(containerSize.width - 32, 0)
-        let mediumHeight = min(containerSize.height * 0.58, 560)
-        let tallHeight = min(containerSize.height * 0.90, containerSize.height - 12)
+        let mediumMaxHeight = min(containerSize.height * 0.58, 560)
+        let tallMaxHeight = min(containerSize.height * 0.90, containerSize.height - 12)
+        let controlsHeightCap = dialDrawerControlsHeightCap(
+            presentation: presentation,
+            panelCount: panels.count,
+            mediumMaxHeight: mediumMaxHeight,
+            tallMaxHeight: tallMaxHeight
+        )
+        let heightCap = dialDrawerHeightCap(
+            presentation: presentation,
+            mediumMaxHeight: mediumMaxHeight,
+            tallMaxHeight: tallMaxHeight
+        )
+        let intrinsicHeight = dialDrawerChromeHeight(panelCount: panels.count) + measuredControlsContentHeight
+        let resolvedHeight = dialResolvedDrawerHeight(
+            presentation: presentation,
+            intrinsicContentHeight: intrinsicHeight,
+            mediumMaxHeight: mediumMaxHeight,
+            tallMaxHeight: tallMaxHeight
+        )
 
         VStack(alignment: .leading, spacing: 0) {
             Capsule()
@@ -375,20 +447,27 @@ private struct DialDrawerPanel: View {
 
             if dialDrawerShowsPanelPicker(panelCount: panels.count) {
                 panelPicker
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, dialDrawerContentInset)
                     .padding(.bottom, 8)
             }
 
             DialPanelControlsView(
                 panel: panel,
-                toolbarBottomPadding: 6,
-                contentBottomPadding: dialDrawerContentBottomPadding
+                toolbarBottomPadding: dialDrawerToolbarBottomPadding,
+                contentBottomPadding: dialDrawerContentInset,
+                maxControlsHeight: controlsHeightCap,
+                onMeasuredControlsHeight: { newHeight in
+                    guard abs(measuredControlsContentHeight - newHeight) > 0.5 else {
+                        return
+                    }
+
+                    measuredControlsContentHeight = newHeight
+                }
             )
         }
         .frame(width: width)
-        .frame(height: panelHeight(medium: mediumHeight, tall: tallHeight), alignment: .top)
-        .padding(.horizontal, 12)
-        .padding(.bottom, dialDrawerChromeBottomPadding)
+        .frame(height: measuredControlsContentHeight > 0 ? resolvedHeight : nil, alignment: .top)
+        .frame(maxHeight: heightCap, alignment: .top)
         .background {
             DialPanelBackground(cornerRadius: 24)
         }
@@ -405,7 +484,6 @@ private struct DialDrawerPanel: View {
                     onDrag(gesture.translation.height)
                 }
         )
-        .padding(.bottom, dialDrawerExternalBottomInset(for: safeAreaInsets.bottom))
     }
 
     private var panelPicker: some View {
@@ -436,30 +514,29 @@ private struct DialDrawerPanel: View {
             Spacer(minLength: 0)
         }
     }
-
-    private func panelHeight(medium: Double, tall: Double) -> Double {
-        switch presentation {
-        case .hidden:
-            return 0
-        case .medium:
-            return medium
-        case .tall:
-            return tall
-        }
-    }
 }
 
 private struct DialPanelControlsView: View {
     @ObservedObject var panel: AnyDialPanelBox
     let toolbarBottomPadding: CGFloat
     let contentBottomPadding: CGFloat
+    let maxControlsHeight: CGFloat?
+    let onMeasuredControlsHeight: ((CGFloat) -> Void)?
 
     @State private var copiedState = false
 
-    init(panel: AnyDialPanelBox, toolbarBottomPadding: CGFloat = 8, contentBottomPadding: CGFloat = 12) {
+    init(
+        panel: AnyDialPanelBox,
+        toolbarBottomPadding: CGFloat = 8,
+        contentBottomPadding: CGFloat = 12,
+        maxControlsHeight: CGFloat? = nil,
+        onMeasuredControlsHeight: ((CGFloat) -> Void)? = nil
+    ) {
         self.panel = panel
         self.toolbarBottomPadding = toolbarBottomPadding
         self.contentBottomPadding = contentBottomPadding
+        self.maxControlsHeight = maxControlsHeight
+        self.onMeasuredControlsHeight = onMeasuredControlsHeight
     }
 
     private var activePresetName: String {
@@ -469,7 +546,7 @@ private struct DialPanelControlsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             toolbar
-                .padding(.horizontal, 12)
+                .padding(.horizontal, dialDrawerContentInset)
                 .padding(.bottom, toolbarBottomPadding)
 
             ScrollView(showsIndicators: false) {
@@ -478,9 +555,19 @@ private struct DialPanelControlsView: View {
                         controlView(control)
                     }
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, dialDrawerContentInset)
                 .padding(.bottom, contentBottomPadding)
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .preference(key: DialMeasuredHeightKey.self, value: proxy.size.height)
+                    }
+                }
             }
+            .frame(maxHeight: maxControlsHeight, alignment: .top)
+        }
+        .onPreferenceChange(DialMeasuredHeightKey.self) { newHeight in
+            onMeasuredControlsHeight?(newHeight)
         }
     }
 
@@ -689,6 +776,14 @@ private struct DialRowBackground: View {
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .fill(DialTheme.surface)
+    }
+}
+
+private struct DialMeasuredHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
