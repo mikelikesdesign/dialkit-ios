@@ -11,7 +11,14 @@ package struct DialResolvedControl: Identifiable {
         self.kind = kind
     }
 
-    package var id: String { path }
+    package var id: String {
+        switch kind {
+        case let .group(group):
+            return "\(path)|group|\(group.collapsed)"
+        default:
+            return path
+        }
+    }
 }
 
 package indirect enum DialResolvedControlKind {

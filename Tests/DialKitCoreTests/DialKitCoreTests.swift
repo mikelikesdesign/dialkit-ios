@@ -141,6 +141,32 @@ final class DialKitCoreTests: XCTestCase {
         XCTAssertEqual(triggered, ["motion.reset"])
     }
 
+    func testConfigureChangingGroupCollapsedStateChangesResolvedIdentity() {
+        let state = makeState()
+        let initialID = state.resolvedControls().last?.id
+
+        state.configure(
+            controls: [
+                .slider("opacity", keyPath: \.opacity, range: 0.0...1.0, step: 0.1),
+                .toggle("enabled", keyPath: \.enabled),
+                .text("title", keyPath: \.title, placeholder: "Title"),
+                .color("accent", keyPath: \.accent),
+                .select("variant", keyPath: \.variant, options: ["primary", "secondary"]),
+                .group(
+                    "motion",
+                    collapsed: true,
+                    children: [
+                        .spring("spring", keyPath: \.spring),
+                        .transition("transition", keyPath: \.transition),
+                        .action("reset")
+                    ]
+                )
+            ]
+        )
+
+        XCTAssertNotEqual(initialID, state.resolvedControls().last?.id)
+    }
+
     func testCopyInstructionIncludesPromptAndJson() {
         let state = makeState()
         let text = state.copyInstructionText()
@@ -149,6 +175,14 @@ final class DialKitCoreTests: XCTestCase {
         XCTAssertTrue(text.contains("```json"))
         XCTAssertTrue(text.contains("\"title\""))
         XCTAssertTrue(text.contains("Apply these values as the new defaults"))
+    }
+
+    func testDialStepPrecisionSupportsFineGrainedSteps() {
+        XCTAssertEqual(dialStepPrecision(1), 0)
+        XCTAssertEqual(dialStepPrecision(0.1), 1)
+        XCTAssertEqual(dialStepPrecision(0.005), 3)
+        XCTAssertEqual(dialStepPrecision(0.000001), 6)
+        XCTAssertEqual(dialFormattedNumber(0.125, step: 0.005), "0.125")
     }
 
     private func makeState() -> DialPanelState<DemoModel> {

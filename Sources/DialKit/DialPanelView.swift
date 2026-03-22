@@ -5,7 +5,7 @@ import UIKit
 #endif
 
 private enum DialTheme {
-    static let panelBackground = Color(hex: "#212121") ?? Color(.sRGB, white: 0.13, opacity: 1)
+    static let panelBackground = dialColor(from: "#212121") ?? Color(.sRGB, white: 0.13, opacity: 1)
     static let border = Color.white.opacity(0.10)
     static let borderSoft = Color.white.opacity(0.06)
     static let surface = Color.white.opacity(0.05)
@@ -124,6 +124,29 @@ package func dialResolvedPanelSelection(current: UUID?, available: [UUID]) -> UU
     return available.first
 }
 
+package let dialDrawerChromeBottomPadding: CGFloat = 12
+package let dialDrawerContentBottomPadding: CGFloat = 20
+
+package func dialDrawerShowsPanelPicker(panelCount: Int) -> Bool {
+    panelCount > 1
+}
+
+package func dialDrawerExternalBottomInset(for safeAreaBottom: CGFloat) -> CGFloat {
+    max(safeAreaBottom, 0)
+}
+
+package func dialSnappedSliderValue(_ raw: Double, range: ClosedRange<Double>, step: Double) -> Double {
+    dialRound(raw, step: step, within: range)
+}
+
+package func dialShouldEmitSliderHaptic(previousValue: Double?, nextValue: Double) -> Bool {
+    guard let previousValue else {
+        return false
+    }
+
+    return previousValue != nextValue
+}
+
 #if canImport(UIKit)
 package func dialClampedFABCenter(
     _ point: CGPoint,
@@ -224,7 +247,6 @@ struct DialDrawerHost: View {
                             presentation: activeDrawerPresentation,
                             containerSize: proxy.size,
                             safeAreaInsets: proxy.safeAreaInsets,
-                            onClose: hideDrawer,
                             onDrag: handleDrawerDrag
                         )
                         .padding(.horizontal, 8)
@@ -336,7 +358,6 @@ private struct DialDrawerPanel: View {
     let presentation: DialDrawerPresentation
     let containerSize: CGSize
     let safeAreaInsets: EdgeInsets
-    let onClose: () -> Void
     let onDrag: (CGFloat) -> Void
 
     var body: some View {
@@ -345,27 +366,29 @@ private struct DialDrawerPanel: View {
         let tallHeight = min(containerSize.height * 0.90, containerSize.height - 12)
 
         VStack(alignment: .leading, spacing: 0) {
-            Button(action: onClose) {
-                Capsule()
-                    .fill(Color.white.opacity(0.22))
-                    .frame(width: 42, height: 5)
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 10)
-                    .padding(.bottom, 12)
-                    .contentShape(Rectangle())
+            Capsule()
+                .fill(Color.white.opacity(0.22))
+                .frame(width: 42, height: 5)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 10)
+                .padding(.bottom, 12)
+
+            if dialDrawerShowsPanelPicker(panelCount: panels.count) {
+                panelPicker
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
             }
-            .buttonStyle(.plain)
 
-            header
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
-
-            DialPanelControlsView(panel: panel, contentBottomPadding: max(safeAreaInsets.bottom, 20))
+            DialPanelControlsView(
+                panel: panel,
+                toolbarBottomPadding: 6,
+                contentBottomPadding: dialDrawerContentBottomPadding
+            )
         }
         .frame(width: width)
         .frame(height: panelHeight(medium: mediumHeight, tall: tallHeight), alignment: .top)
         .padding(.horizontal, 12)
-        .padding(.bottom, max(safeAreaInsets.bottom, 12))
+        .padding(.bottom, dialDrawerChromeBottomPadding)
         .background {
             DialPanelBackground(cornerRadius: 24)
         }
@@ -382,50 +405,35 @@ private struct DialDrawerPanel: View {
                     onDrag(gesture.translation.height)
                 }
         )
+        .padding(.bottom, dialDrawerExternalBottomInset(for: safeAreaInsets.bottom))
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            if panels.count > 1 {
-                Menu {
-                    ForEach(panels) { candidate in
-                        Button(candidate.name) {
-                            selectedPanelID = candidate.id
-                        }
+    private var panelPicker: some View {
+        HStack(spacing: 0) {
+            Menu {
+                ForEach(panels) { candidate in
+                    Button(candidate.name) {
+                        selectedPanelID = candidate.id
                     }
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(panel.name)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(DialTheme.textRoot)
-                            .lineLimit(1)
-
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(DialTheme.textLabel.opacity(0.8))
-                    }
-                    .frame(height: 32)
-                    .padding(.horizontal, 10)
-                    .background(DialRowBackground(cornerRadius: 8))
                 }
-                .buttonStyle(.plain)
-            } else {
-                Text(panel.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DialTheme.textRoot)
-                    .lineLimit(1)
-            }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(panel.name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(DialTheme.textRoot)
+                        .lineLimit(1)
 
-            Spacer(minLength: 0)
-
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(DialTheme.textLabel)
-                    .frame(width: 24, height: 24)
-                    .background(DialRowBackground(cornerRadius: 8))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(DialTheme.textLabel.opacity(0.8))
+                }
+                .frame(height: 32)
+                .padding(.horizontal, 10)
+                .background(DialRowBackground(cornerRadius: 8))
             }
             .buttonStyle(.plain)
+
+            Spacer(minLength: 0)
         }
     }
 
@@ -443,12 +451,14 @@ private struct DialDrawerPanel: View {
 
 private struct DialPanelControlsView: View {
     @ObservedObject var panel: AnyDialPanelBox
+    let toolbarBottomPadding: CGFloat
     let contentBottomPadding: CGFloat
 
     @State private var copiedState = false
 
-    init(panel: AnyDialPanelBox, contentBottomPadding: CGFloat = 12) {
+    init(panel: AnyDialPanelBox, toolbarBottomPadding: CGFloat = 8, contentBottomPadding: CGFloat = 12) {
         self.panel = panel
+        self.toolbarBottomPadding = toolbarBottomPadding
         self.contentBottomPadding = contentBottomPadding
     }
 
@@ -460,7 +470,7 @@ private struct DialPanelControlsView: View {
         VStack(alignment: .leading, spacing: 0) {
             toolbar
                 .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+                .padding(.bottom, toolbarBottomPadding)
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 6) {
@@ -978,6 +988,9 @@ private struct DialFolderSection<Content: View>: View {
                 .frame(height: 1)
         }
         .padding(.vertical, 4)
+        .onChange(of: defaultOpen) { _, newValue in
+            isExpanded = newValue
+        }
     }
 }
 
@@ -1147,9 +1160,9 @@ private struct DialColorRow: View {
 
     private var pickerBinding: Binding<Color> {
         Binding {
-            Color(hex: hexValue) ?? .white
+            dialColor(from: hexValue) ?? .white
         } set: { newColor in
-            if let hex = newColor.hexString {
+            if let hex = dialHexString(from: newColor, prefersAlphaOutput: dialHexUsesExplicitAlpha(hexValue)) {
                 hexValue = hex
                 draft = hex
             }
@@ -1176,7 +1189,7 @@ private struct DialColorRow: View {
                 }
                 .onSubmit(commitDraft)
 
-            ColorPicker("", selection: pickerBinding, supportsOpacity: false)
+            ColorPicker("", selection: pickerBinding, supportsOpacity: true)
                 .labelsHidden()
                 .frame(width: 24, height: 24)
         }
@@ -1212,6 +1225,10 @@ private struct DialSliderRow: View {
     @State private var isEditing = false
     @State private var draft = ""
     @State private var isInteracting = false
+    @State private var lastHapticValue: Double?
+    #if canImport(UIKit)
+    @State private var feedbackGenerator: UISelectionFeedbackGenerator?
+    #endif
 
     private var value: Double {
         slider.get()
@@ -1228,6 +1245,16 @@ private struct DialSliderRow: View {
 
             ZStack(alignment: .leading) {
                 DialRowBackground(cornerRadius: 8)
+
+                HStack(spacing: 0) {
+                    ForEach(0..<11, id: \.self) { _ in
+                        Capsule()
+                            .fill(Color.white.opacity(isInteracting ? 0.15 : 0))
+                            .frame(width: 1, height: 8)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.horizontal, 8)
 
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.white.opacity(isInteracting ? 0.14 : 0.10))
@@ -1270,12 +1297,13 @@ private struct DialSliderRow: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { gesture in
-                        isEditing = false
-                        isInteracting = true
+                        if !isInteracting {
+                            beginInteraction()
+                        }
                         updateValue(at: gesture.location.x, width: width)
                     }
                     .onEnded { _ in
-                        isInteracting = false
+                        endInteraction()
                     }
             )
         }
@@ -1293,7 +1321,17 @@ private struct DialSliderRow: View {
         let clampedX = min(max(x, 0), width)
         let fraction = clampedX / width
         let raw = slider.range.lowerBound + Double(fraction) * (slider.range.upperBound - slider.range.lowerBound)
-        slider.set(raw)
+        let snapped = dialSnappedSliderValue(raw, range: slider.range, step: slider.step)
+
+        if dialShouldEmitSliderHaptic(previousValue: lastHapticValue, nextValue: snapped) {
+            #if canImport(UIKit)
+            feedbackGenerator?.selectionChanged()
+            feedbackGenerator?.prepare()
+            #endif
+        }
+
+        lastHapticValue = snapped
+        slider.set(snapped)
     }
 
     private func commitDraft() {
@@ -1304,6 +1342,25 @@ private struct DialSliderRow: View {
         }
         slider.set(parsed)
         draft = value.formatted(step: slider.step)
+    }
+
+    private func beginInteraction() {
+        isEditing = false
+        isInteracting = true
+        lastHapticValue = value
+        #if canImport(UIKit)
+        let generator = UISelectionFeedbackGenerator()
+        generator.prepare()
+        feedbackGenerator = generator
+        #endif
+    }
+
+    private func endInteraction() {
+        isInteracting = false
+        lastHapticValue = nil
+        #if canImport(UIKit)
+        feedbackGenerator = nil
+        #endif
     }
 }
 
@@ -1666,79 +1723,77 @@ private func copyTextToPasteboard(_ text: String) {
 
 private extension Double {
     func formatted(step: Double) -> String {
-        let decimals: Int
-        if step >= 1 {
-            decimals = 0
-        } else if step >= 0.1 {
-            decimals = 1
-        } else {
-            decimals = 2
-        }
-
-        return String(format: "%0.*f", decimals, self)
+        dialFormattedNumber(self, step: step)
     }
 }
 
-private extension Color {
-    init?(hex: String) {
-        let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
-        let length = cleaned.count
+package func dialHexUsesExplicitAlpha(_ hex: String) -> Bool {
+    let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+    return cleaned.count == 8
+}
 
-        guard length == 3 || length == 6 || length == 8 else {
-            return nil
-        }
+package func dialColor(from hex: String) -> Color? {
+    let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+    let length = cleaned.count
 
-        let expanded: String
-        if length == 3 {
-            expanded = cleaned.map { "\($0)\($0)" }.joined()
-        } else {
-            expanded = cleaned
-        }
-
-        var hexValue: UInt64 = 0
-        guard Scanner(string: expanded).scanHexInt64(&hexValue) else {
-            return nil
-        }
-
-        let red, green, blue, alpha: Double
-        switch expanded.count {
-        case 6:
-            red = Double((hexValue >> 16) & 0xFF) / 255
-            green = Double((hexValue >> 8) & 0xFF) / 255
-            blue = Double(hexValue & 0xFF) / 255
-            alpha = 1
-        case 8:
-            red = Double((hexValue >> 24) & 0xFF) / 255
-            green = Double((hexValue >> 16) & 0xFF) / 255
-            blue = Double((hexValue >> 8) & 0xFF) / 255
-            alpha = Double(hexValue & 0xFF) / 255
-        default:
-            return nil
-        }
-
-        self = Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha)
-    }
-
-    var hexString: String? {
-        #if canImport(UIKit)
-        let uiColor = UIColor(self)
-        var red: CGFloat = 0
-        var green: CGFloat = 0
-        var blue: CGFloat = 0
-        var alpha: CGFloat = 0
-
-        guard uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
-            return nil
-        }
-
-        return String(
-            format: "#%02X%02X%02X",
-            Int(round(red * 255)),
-            Int(round(green * 255)),
-            Int(round(blue * 255))
-        )
-        #else
+    guard length == 3 || length == 6 || length == 8 else {
         return nil
-        #endif
     }
+
+    let expanded: String
+    if length == 3 {
+        expanded = cleaned.map { "\($0)\($0)" }.joined()
+    } else {
+        expanded = cleaned
+    }
+
+    var hexValue: UInt64 = 0
+    guard Scanner(string: expanded).scanHexInt64(&hexValue) else {
+        return nil
+    }
+
+    let red, green, blue, alpha: Double
+    switch expanded.count {
+    case 6:
+        red = Double((hexValue >> 16) & 0xFF) / 255
+        green = Double((hexValue >> 8) & 0xFF) / 255
+        blue = Double(hexValue & 0xFF) / 255
+        alpha = 1
+    case 8:
+        red = Double((hexValue >> 24) & 0xFF) / 255
+        green = Double((hexValue >> 16) & 0xFF) / 255
+        blue = Double((hexValue >> 8) & 0xFF) / 255
+        alpha = Double(hexValue & 0xFF) / 255
+    default:
+        return nil
+    }
+
+    return Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha)
+}
+
+package func dialHexString(from color: Color, prefersAlphaOutput: Bool = false) -> String? {
+    #if canImport(UIKit)
+    let uiColor = UIColor(color)
+    var red: CGFloat = 0
+    var green: CGFloat = 0
+    var blue: CGFloat = 0
+    var alpha: CGFloat = 0
+
+    guard uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+        return nil
+    }
+
+    let redValue = Int(round(red * 255))
+    let greenValue = Int(round(green * 255))
+    let blueValue = Int(round(blue * 255))
+    let alphaValue = Int(round(alpha * 255))
+
+    if prefersAlphaOutput || alphaValue < 255 {
+        return String(format: "#%02X%02X%02X%02X", redValue, greenValue, blueValue, alphaValue)
+    }
+
+    return String(format: "#%02X%02X%02X", redValue, greenValue, blueValue)
+    #else
+    return nil
+    #endif
 }

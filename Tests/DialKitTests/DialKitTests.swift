@@ -55,12 +55,53 @@ final class DialKitTests: XCTestCase {
         _ = view
     }
 
+    func testHexColorRoundTripsPreservingAlpha() throws {
+        let translucent = try XCTUnwrap(dialColor(from: "#33669980"))
+        XCTAssertEqual(dialHexString(from: translucent), "#33669980")
+
+        let opaque = try XCTUnwrap(dialColor(from: "#112233FF"))
+        XCTAssertEqual(dialHexString(from: opaque, prefersAlphaOutput: true), "#112233FF")
+        XCTAssertTrue(dialHexUsesExplicitAlpha("#112233FF"))
+        XCTAssertFalse(dialHexUsesExplicitAlpha("#112233"))
+    }
+
     func testDrawerPresentationSnapsBetweenStates() {
         XCTAssertEqual(dialNextDrawerPresentation(from: .hidden, translationHeight: -80), .medium)
         XCTAssertEqual(dialNextDrawerPresentation(from: .medium, translationHeight: -80), .tall)
         XCTAssertEqual(dialNextDrawerPresentation(from: .tall, translationHeight: 80), .medium)
         XCTAssertEqual(dialNextDrawerPresentation(from: .medium, translationHeight: 80), .hidden)
         XCTAssertEqual(dialNextDrawerPresentation(from: .medium, translationHeight: 10), .medium)
+    }
+
+    func testDrawerHelpersMatchPickerAndPaddingRules() {
+        XCTAssertFalse(dialDrawerShowsPanelPicker(panelCount: 1))
+        XCTAssertTrue(dialDrawerShowsPanelPicker(panelCount: 2))
+
+        XCTAssertEqual(dialDrawerChromeBottomPadding, 12)
+        XCTAssertEqual(dialDrawerContentBottomPadding, 20)
+        XCTAssertEqual(dialDrawerExternalBottomInset(for: 0), 0)
+        XCTAssertEqual(dialDrawerExternalBottomInset(for: 34), 34)
+    }
+
+    func testSliderSnappingReturnsSameStepWithinBoundary() {
+        XCTAssertEqual(dialSnappedSliderValue(0.11, range: 0.0...1.0, step: 0.1), 0.1, accuracy: 0.0001)
+        XCTAssertEqual(dialSnappedSliderValue(0.14, range: 0.0...1.0, step: 0.1), 0.1, accuracy: 0.0001)
+    }
+
+    func testSliderSnappingChangesAcrossBoundary() {
+        XCTAssertEqual(dialSnappedSliderValue(0.16, range: 0.0...1.0, step: 0.1), 0.2, accuracy: 0.0001)
+        XCTAssertEqual(dialSnappedSliderValue(0.26, range: 0.0...1.0, step: 0.1), 0.3, accuracy: 0.0001)
+    }
+
+    func testSliderSnappingClampsToRange() {
+        XCTAssertEqual(dialSnappedSliderValue(-0.5, range: 0.0...1.0, step: 0.1), 0.0, accuracy: 0.0001)
+        XCTAssertEqual(dialSnappedSliderValue(1.6, range: 0.0...1.0, step: 0.1), 1.0, accuracy: 0.0001)
+    }
+
+    func testSliderHapticHelperOnlyFiresOnStepChange() {
+        XCTAssertFalse(dialShouldEmitSliderHaptic(previousValue: nil, nextValue: 0.1))
+        XCTAssertFalse(dialShouldEmitSliderHaptic(previousValue: 0.1, nextValue: 0.1))
+        XCTAssertTrue(dialShouldEmitSliderHaptic(previousValue: 0.1, nextValue: 0.2))
     }
 
     func testResolvedPanelSelectionFallsBackToFirstAvailablePanel() {

@@ -251,11 +251,20 @@ package func dialIsValidHexColor(_ value: String) -> Bool {
 }
 
 package func dialStepPrecision(_ step: Double) -> Int {
-    let text = String(step)
-    guard let decimalIndex = text.firstIndex(of: ".") else {
+    let safeStep = abs(step)
+    guard safeStep > 0 else {
         return 0
     }
-    return text.distance(from: decimalIndex, to: text.endIndex) - 1
+
+    for precision in 0...6 {
+        let factor = pow(10.0, Double(precision))
+        let scaled = safeStep * factor
+        if abs(scaled.rounded() - scaled) < 0.000_000_1 {
+            return precision
+        }
+    }
+
+    return 6
 }
 
 package func dialRound(_ value: Double, step: Double, within range: ClosedRange<Double>) -> Double {
@@ -264,6 +273,11 @@ package func dialRound(_ value: Double, step: Double, within range: ClosedRange<
     let clamped = min(max(stepped, range.lowerBound), range.upperBound)
     let precision = dialStepPrecision(safeStep)
     return Double(String(format: "%0.*f", precision, clamped)) ?? clamped
+}
+
+package func dialFormattedNumber(_ value: Double, step: Double) -> String {
+    let precision = dialStepPrecision(step)
+    return String(format: "%0.*f", precision, value)
 }
 
 package func dialInferredStep(for range: ClosedRange<Double>) -> Double {
