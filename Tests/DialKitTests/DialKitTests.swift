@@ -78,9 +78,16 @@ final class DialKitTests: XCTestCase {
         XCTAssertTrue(dialDrawerShowsPanelPicker(panelCount: 2))
 
         XCTAssertEqual(dialDrawerContentInset, 12)
+        XCTAssertEqual(dialDrawerHorizontalInset, 8)
         XCTAssertEqual(dialDrawerToolbarBottomPadding, 6)
         XCTAssertEqual(dialDrawerChromeHeight(panelCount: 1), 69)
         XCTAssertEqual(dialDrawerChromeHeight(panelCount: 2), 109)
+    }
+
+    func testResolvedDrawerWidthUsesSingleOuterInsetPerSide() {
+        XCTAssertEqual(dialResolvedDrawerWidth(containerWidth: 390), 374)
+        XCTAssertEqual(dialResolvedDrawerWidth(containerWidth: 320), 304)
+        XCTAssertEqual(dialResolvedDrawerWidth(containerWidth: 12), 0)
     }
 
     func testResolvedDrawerHeightUsesIntrinsicHeightForShortContent() {

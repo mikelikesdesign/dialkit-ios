@@ -125,6 +125,7 @@ package func dialResolvedPanelSelection(current: UUID?, available: [UUID]) -> UU
 }
 
 package let dialDrawerContentInset: CGFloat = 12
+package let dialDrawerHorizontalInset: CGFloat = 8
 package let dialDrawerToolbarBottomPadding: CGFloat = 6
 
 private let dialDrawerHandleSectionHeight: CGFloat = 27
@@ -133,6 +134,10 @@ private let dialDrawerToolbarSectionHeight: CGFloat = 42
 
 package func dialDrawerShowsPanelPicker(panelCount: Int) -> Bool {
     panelCount > 1
+}
+
+package func dialResolvedDrawerWidth(containerWidth: CGFloat) -> CGFloat {
+    max(containerWidth - (dialDrawerHorizontalInset * 2), 0)
 }
 
 package func dialDrawerChromeHeight(panelCount: Int) -> CGFloat {
@@ -302,7 +307,7 @@ struct DialDrawerHost: View {
                             containerSize: proxy.size,
                             onDrag: handleDrawerDrag
                         )
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, dialDrawerHorizontalInset)
                         .offset(y: drawerPresentation == .hidden ? proxy.size.height + 24 : 0)
                         .allowsHitTesting(drawerPresentation.isExpanded)
                     }
@@ -415,7 +420,7 @@ private struct DialDrawerPanel: View {
     @State private var measuredControlsContentHeight: CGFloat = 0
 
     var body: some View {
-        let width = max(containerSize.width - 32, 0)
+        let width = dialResolvedDrawerWidth(containerWidth: containerSize.width)
         let mediumMaxHeight = min(containerSize.height * 0.58, 560)
         let tallMaxHeight = min(containerSize.height * 0.90, containerSize.height - 12)
         let controlsHeightCap = dialDrawerControlsHeightCap(
