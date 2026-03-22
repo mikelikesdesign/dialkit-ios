@@ -128,6 +128,11 @@ package let dialDrawerContentInset: CGFloat = 12
 package let dialDrawerHorizontalInset: CGFloat = 8
 package let dialDrawerToolbarBottomPadding: CGFloat = 6
 
+package struct DialSectionDividerVisibility: Equatable {
+    package let showsTopDivider: Bool
+    package let showsBottomDivider: Bool
+}
+
 private let dialDrawerHandleSectionHeight: CGFloat = 27
 private let dialDrawerPanelPickerSectionHeight: CGFloat = 40
 private let dialDrawerToolbarSectionHeight: CGFloat = 42
@@ -204,6 +209,26 @@ package func dialShouldEmitSliderHaptic(previousValue: Double?, nextValue: Doubl
     }
 
     return previousValue != nextValue
+}
+
+package func dialControlUsesSectionDivider(_ control: DialResolvedControl) -> Bool {
+    switch control.kind {
+    case .spring, .transition, .group:
+        return true
+    default:
+        return false
+    }
+}
+
+package func dialSectionDividerVisibility(at index: Int, in controls: [DialResolvedControl]) -> DialSectionDividerVisibility {
+    guard controls.indices.contains(index), dialControlUsesSectionDivider(controls[index]) else {
+        return DialSectionDividerVisibility(showsTopDivider: false, showsBottomDivider: false)
+    }
+
+    return DialSectionDividerVisibility(
+        showsTopDivider: controls[..<index].contains(where: dialControlUsesSectionDivider),
+        showsBottomDivider: false
+    )
 }
 
 package func dialAccordionIDs(in controls: [DialResolvedControl]) -> Set<String> {
@@ -576,9 +601,7 @@ private struct DialPanelControlsView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 6) {
-                    ForEach(controls) { control in
-                        controlView(control)
-                    }
+                    controlList(controls)
                 }
                 .padding(.horizontal, dialDrawerContentInset)
                 .padding(.bottom, contentBottomPadding)
@@ -675,7 +698,22 @@ private struct DialPanelControlsView: View {
         }
     }
 
-    private func controlView(_ control: DialResolvedControl) -> AnyView {
+    private func controlList(_ controls: [DialResolvedControl]) -> some View {
+        ForEach(Array(controls.enumerated()), id: \.element.id) { index, control in
+            controlView(
+                control,
+                dividerVisibility: dialSectionDividerVisibility(at: index, in: controls)
+            )
+        }
+    }
+
+    private func controlView(
+        _ control: DialResolvedControl,
+        dividerVisibility: DialSectionDividerVisibility = DialSectionDividerVisibility(
+            showsTopDivider: false,
+            showsBottomDivider: false
+        )
+    ) -> AnyView {
         switch control.kind {
         case let .slider(slider):
             return AnyView(DialSliderRow(title: control.label, slider: slider))
@@ -688,15 +726,32 @@ private struct DialPanelControlsView: View {
         case let .select(select):
             return AnyView(DialSelectRow(title: control.label, options: select.options, selection: Binding(get: select.get, set: select.set)))
         case let .spring(spring):
-            return AnyView(DialSpringControl(title: control.label, control: spring, isExpanded: accordionBinding(id: control.id, defaultOpen: true)))
+            return AnyView(
+                DialSpringControl(
+                    title: control.label,
+                    control: spring,
+                    isExpanded: accordionBinding(id: control.id, defaultOpen: true),
+                    dividerVisibility: dividerVisibility
+                )
+            )
         case let .transition(transition):
-            return AnyView(DialTransitionControl(title: control.label, control: transition, isExpanded: accordionBinding(id: control.id, defaultOpen: true)))
+            return AnyView(
+                DialTransitionControl(
+                    title: control.label,
+                    control: transition,
+                    isExpanded: accordionBinding(id: control.id, defaultOpen: true),
+                    dividerVisibility: dividerVisibility
+                )
+            )
         case let .group(group):
             return AnyView(
-                DialFolderSection(title: control.label, isExpanded: accordionBinding(id: control.id, defaultOpen: !group.collapsed)) {
-                    ForEach(group.children) { child in
-                        controlView(child)
-                    }
+                DialFolderSection(
+                    title: control.label,
+                    isExpanded: accordionBinding(id: control.id, defaultOpen: !group.collapsed),
+                    showsTopDivider: dividerVisibility.showsTopDivider,
+                    showsBottomDivider: dividerVisibility.showsBottomDivider
+                ) {
+                    controlList(group.children)
                 }
             )
         case let .action(action):
@@ -1068,13 +1123,23 @@ private final class FABContainerView: UIView {
 private struct DialFolderSection<Content: View>: View {
     let title: String
     @Binding var isExpanded: Bool
+    let showsTopDivider: Bool
+    let showsBottomDivider: Bool
     let content: Content
 
     @State private var measuredContentHeight: CGFloat?
 
-    init(title: String, isExpanded: Binding<Bool>, @ViewBuilder content: () -> Content) {
+    init(
+        title: String,
+        isExpanded: Binding<Bool>,
+        showsTopDivider: Bool = false,
+        showsBottomDivider: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
         self._isExpanded = isExpanded
+        self.showsTopDivider = showsTopDivider
+        self.showsBottomDivider = showsBottomDivider
         self.content = content()
     }
 
@@ -1131,14 +1196,18 @@ private struct DialFolderSection<Content: View>: View {
             measuredContentHeight = newHeight
         }
         .overlay(alignment: .top) {
-            Rectangle()
-                .fill(DialTheme.borderSoft)
-                .frame(height: 1)
+            if showsTopDivider {
+                Rectangle()
+                    .fill(DialTheme.borderSoft)
+                    .frame(height: 1)
+            }
         }
         .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(DialTheme.borderSoft)
-                .frame(height: 1)
+            if showsBottomDivider {
+                Rectangle()
+                    .fill(DialTheme.borderSoft)
+                    .frame(height: 1)
+            }
         }
         .padding(.vertical, 4)
     }
@@ -1548,9 +1617,15 @@ private struct DialSpringControl: View {
     let title: String
     let control: DialResolvedSpring
     @Binding var isExpanded: Bool
+    let dividerVisibility: DialSectionDividerVisibility
 
     var body: some View {
-        DialFolderSection(title: title, isExpanded: $isExpanded) {
+        DialFolderSection(
+            title: title,
+            isExpanded: $isExpanded,
+            showsTopDivider: dividerVisibility.showsTopDivider,
+            showsBottomDivider: dividerVisibility.showsBottomDivider
+        ) {
             SpringVisualization(spring: control.get())
                 .frame(height: 140)
 
@@ -1587,9 +1662,15 @@ private struct DialTransitionControl: View {
     let title: String
     let control: DialResolvedTransition
     @Binding var isExpanded: Bool
+    let dividerVisibility: DialSectionDividerVisibility
 
     var body: some View {
-        DialFolderSection(title: title, isExpanded: $isExpanded) {
+        DialFolderSection(
+            title: title,
+            isExpanded: $isExpanded,
+            showsTopDivider: dividerVisibility.showsTopDivider,
+            showsBottomDivider: dividerVisibility.showsBottomDivider
+        ) {
             switch control.get() {
             case let .easing(_, bezier):
                 EasingVisualization(bezier: bezier)

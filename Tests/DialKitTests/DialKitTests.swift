@@ -90,6 +90,54 @@ final class DialKitTests: XCTestCase {
         XCTAssertEqual(dialResolvedDrawerWidth(containerWidth: 12), 0)
     }
 
+    func testDrawerSectionDividerVisibilitySkipsFirstSection() {
+        let controls = [groupControl(path: "layout")]
+
+        XCTAssertEqual(
+            dialSectionDividerVisibility(at: 0, in: controls),
+            DialSectionDividerVisibility(showsTopDivider: false, showsBottomDivider: false)
+        )
+    }
+
+    func testDrawerSectionDividerVisibilityAddsSingleDividerAboveLaterSection() {
+        let controls = [
+            groupControl(path: "layout"),
+            springControl(path: "motion.spring")
+        ]
+
+        XCTAssertEqual(
+            dialSectionDividerVisibility(at: 1, in: controls),
+            DialSectionDividerVisibility(showsTopDivider: true, showsBottomDivider: false)
+        )
+    }
+
+    func testDrawerSectionDividerVisibilityIgnoresNonSectionRowsUntilLaterSection() {
+        let controls = [
+            sliderControl(path: "columns"),
+            groupControl(path: "layout"),
+            textControl(path: "title"),
+            transitionControl(path: "motion.transition")
+        ]
+
+        XCTAssertEqual(
+            dialSectionDividerVisibility(at: 1, in: controls),
+            DialSectionDividerVisibility(showsTopDivider: false, showsBottomDivider: false)
+        )
+        XCTAssertEqual(
+            dialSectionDividerVisibility(at: 3, in: controls),
+            DialSectionDividerVisibility(showsTopDivider: true, showsBottomDivider: false)
+        )
+    }
+
+    func testDrawerSectionDividerVisibilityNeverRequestsTrailingDivider() {
+        let controls = [
+            groupControl(path: "layout"),
+            transitionControl(path: "motion.transition")
+        ]
+
+        XCTAssertFalse(dialSectionDividerVisibility(at: 1, in: controls).showsBottomDivider)
+    }
+
     func testAccordionIDsCollectAccordionCapableControlsRecursively() {
         let nestedSpring = DialResolvedControl(
             path: "motion.spring",
@@ -259,6 +307,75 @@ final class DialKitTests: XCTestCase {
         XCTAssertEqual(dialResolvedPanelSelection(current: second, available: [first, second]), second)
         XCTAssertEqual(dialResolvedPanelSelection(current: UUID(), available: [first, second]), first)
         XCTAssertNil(dialResolvedPanelSelection(current: first, available: []))
+    }
+
+    private func sliderControl(path: String) -> DialResolvedControl {
+        DialResolvedControl(
+            path: path,
+            label: path,
+            kind: .slider(
+                DialResolvedSlider(
+                    range: 0...1,
+                    step: 0.1,
+                    unit: nil,
+                    get: { 0 },
+                    set: { _ in }
+                )
+            )
+        )
+    }
+
+    private func textControl(path: String) -> DialResolvedControl {
+        DialResolvedControl(
+            path: path,
+            label: path,
+            kind: .text(
+                DialResolvedText(
+                    placeholder: nil,
+                    get: { "" },
+                    set: { _ in }
+                )
+            )
+        )
+    }
+
+    private func springControl(path: String) -> DialResolvedControl {
+        DialResolvedControl(
+            path: path,
+            label: path,
+            kind: .spring(
+                DialResolvedSpring(
+                    get: { .default },
+                    set: { _ in }
+                )
+            )
+        )
+    }
+
+    private func transitionControl(path: String) -> DialResolvedControl {
+        DialResolvedControl(
+            path: path,
+            label: path,
+            kind: .transition(
+                DialResolvedTransition(
+                    get: { .default },
+                    set: { _ in }
+                )
+            )
+        )
+    }
+
+    private func groupControl(path: String) -> DialResolvedControl {
+        DialResolvedControl(
+            path: path,
+            label: path,
+            kind: .group(
+                DialResolvedGroup(
+                    collapsed: false,
+                    children: []
+                )
+            )
+        )
     }
 
     #if canImport(UIKit)
