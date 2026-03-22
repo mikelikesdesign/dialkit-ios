@@ -90,6 +90,41 @@ final class DialKitTests: XCTestCase {
         XCTAssertEqual(dialResolvedDrawerWidth(containerWidth: 12), 0)
     }
 
+    func testActivePresetNameFallsBackToVersionOneWhenNoPresetIsSelected() {
+        let first = DialPresetSummary(id: UUID(), name: "Version 2")
+
+        XCTAssertEqual(
+            dialActivePresetName(activePresetID: nil, presets: [first]),
+            "Version 1"
+        )
+    }
+
+    func testActivePresetNameUsesSelectedPresetName() {
+        let first = DialPresetSummary(id: UUID(), name: "Version 2")
+        let second = DialPresetSummary(id: UUID(), name: "Version 3")
+
+        XCTAssertEqual(
+            dialActivePresetName(activePresetID: second.id, presets: [first, second]),
+            "Version 3"
+        )
+    }
+
+    func testPresetSelectionActionClearsWhenSelectingBaseState() {
+        XCTAssertEqual(
+            dialPresetSelectionAction(for: nil),
+            .clear
+        )
+    }
+
+    func testPresetSelectionActionLoadsSelectedPresetID() {
+        let presetID = UUID()
+
+        XCTAssertEqual(
+            dialPresetSelectionAction(for: presetID),
+            .load(presetID)
+        )
+    }
+
     func testDrawerSectionDividerVisibilitySkipsFirstSection() {
         let controls = [groupControl(path: "layout")]
 

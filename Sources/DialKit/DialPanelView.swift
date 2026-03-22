@@ -211,6 +211,23 @@ package func dialShouldEmitSliderHaptic(previousValue: Double?, nextValue: Doubl
     return previousValue != nextValue
 }
 
+package func dialActivePresetName(activePresetID: UUID?, presets: [DialPresetSummary]) -> String {
+    presets.first(where: { $0.id == activePresetID })?.name ?? "Version 1"
+}
+
+package enum DialPresetSelectionAction: Equatable {
+    case clear
+    case load(UUID)
+}
+
+package func dialPresetSelectionAction(for selection: UUID?) -> DialPresetSelectionAction {
+    if let selection {
+        return .load(selection)
+    }
+
+    return .clear
+}
+
 package func dialControlUsesSectionDivider(_ control: DialResolvedControl) -> Bool {
     switch control.kind {
     case .spring, .transition, .group:
@@ -587,7 +604,21 @@ private struct DialPanelControlsView: View {
     }
 
     private var activePresetName: String {
-        panel.presets.first(where: { $0.id == panel.activePresetID })?.name ?? "Version 1"
+        dialActivePresetName(activePresetID: panel.activePresetID, presets: panel.presets)
+    }
+
+    private var presetSelection: Binding<UUID?> {
+        Binding(
+            get: { panel.activePresetID },
+            set: {
+                switch dialPresetSelectionAction(for: $0) {
+                case .clear:
+                    panel.clearActivePreset()
+                case let .load(id):
+                    panel.loadPreset(id: id)
+                }
+            }
+        )
     }
 
     var body: some View {
@@ -639,17 +670,13 @@ private struct DialPanelControlsView: View {
             .buttonStyle(.plain)
 
             Menu {
-                Button("Version 1") {
-                    panel.clearActivePreset()
-                }
+                Picker("Preset", selection: presetSelection) {
+                    Text("Version 1")
+                        .tag(Optional<UUID>.none)
 
-                if !panel.presets.isEmpty {
-                    Divider()
-                }
-
-                ForEach(panel.presets) { preset in
-                    Button(preset.name) {
-                        panel.loadPreset(id: preset.id)
+                    ForEach(panel.presets) { preset in
+                        Text(preset.name)
+                            .tag(Optional(preset.id))
                     }
                 }
 
