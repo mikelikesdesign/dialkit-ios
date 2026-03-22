@@ -4,6 +4,8 @@ DialKit is a SwiftUI control panel package for tuning view state at runtime on i
 
 > Work in progress: this package is still being actively developed and the API may change.
 
+https://github.com/user-attachments/assets/f4fefce9-c563-4587-bf4d-ea64422dc1af
+
 ## Credit
 
 This package is a forked Swift package adaptation of Josh Puckett's open source DialKit project.
