@@ -10,10 +10,7 @@ https://github.com/user-attachments/assets/f4fefce9-c563-4587-bf4d-ea64422dc1af
 
 ## Credit
 
-This package is a forked Swift package adaptation of Josh Puckett's open source DialKit project.
-
-- Creator of the upstream project: [Josh Puckett](https://github.com/joshpuckett)
-- Upstream repository: [joshpuckett/dialkit](https://github.com/joshpuckett/dialkit)
+This package is based on the original DialKit repository by Josh Puckett.
 
 ## Requirements
 
