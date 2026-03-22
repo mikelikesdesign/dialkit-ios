@@ -4,6 +4,8 @@ DialKit is a SwiftUI package for editing and previewing interface updates live.
 
 > Work in progress: this package is still being actively developed and the API may change.
 
+![DialKit demo](media/dialkit.gif)
+
 https://github.com/user-attachments/assets/f4fefce9-c563-4587-bf4d-ea64422dc1af
 
 ## Credit
