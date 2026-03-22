@@ -1,6 +1,6 @@
 # DialKit
 
-DialKit is a SwiftUI control panel package for tuning view state at runtime on iOS 17 and later.
+DialKit is a SwiftUI package for editing and previewing interface updates live.
 
 > Work in progress: this package is still being actively developed and the API may change.
 
