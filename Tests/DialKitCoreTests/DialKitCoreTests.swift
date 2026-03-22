@@ -87,7 +87,7 @@ final class DialKitCoreTests: XCTestCase {
         state.values.opacity = 0.8
 
         state.savePreset(named: "Hero")
-        let presetID = try XCTUnwrap(state.activePresetID)
+        let firstPresetID = try XCTUnwrap(state.activePresetID)
 
         state.values.opacity = 0.3
         XCTAssertEqual(try XCTUnwrap(state.presets.first?.values.opacity), 0.3, accuracy: 0.0001)
@@ -96,12 +96,32 @@ final class DialKitCoreTests: XCTestCase {
         XCTAssertNil(state.activePresetID)
         XCTAssertEqual(state.values.opacity, 0.8, accuracy: 0.0001)
 
-        state.loadPreset(id: presetID)
+        state.loadPreset(id: firstPresetID)
         XCTAssertEqual(state.values.opacity, 0.3, accuracy: 0.0001)
 
-        state.deletePreset(id: presetID)
+        state.deletePreset(id: firstPresetID)
         XCTAssertTrue(state.presets.isEmpty)
         XCTAssertNil(state.activePresetID)
+        XCTAssertEqual(state.values.opacity, 0.8, accuracy: 0.0001)
+
+        state.values.opacity = 0.6
+        state.savePreset(named: "Hero")
+        let activePresetID = try XCTUnwrap(state.activePresetID)
+        state.values.opacity = 0.4
+
+        state.clearActivePreset()
+        state.values.opacity = 0.9
+        state.savePreset(named: "Secondary")
+        let secondaryPresetID = try XCTUnwrap(state.activePresetID)
+        state.values.opacity = 0.2
+
+        state.loadPreset(id: activePresetID)
+        XCTAssertEqual(state.values.opacity, 0.4, accuracy: 0.0001)
+
+        state.deletePreset(id: secondaryPresetID)
+        XCTAssertEqual(state.activePresetID, activePresetID)
+        XCTAssertEqual(state.values.opacity, 0.4, accuracy: 0.0001)
+        XCTAssertEqual(state.presets.map(\.id), [activePresetID])
     }
 
     func testTransitionModeSwitchingProducesExpectedShapes() {

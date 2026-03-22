@@ -110,9 +110,10 @@ public final class DialPanelState<Model: Codable & Equatable>: ObservableObject,
     }
 
     public func deletePreset(id: UUID) {
+        let isDeletingActivePreset = activePresetID == id
         presets.removeAll { $0.id == id }
-        if activePresetID == id {
-            activePresetID = nil
+        if isDeletingActivePreset {
+            clearActivePreset()
         }
     }
 
