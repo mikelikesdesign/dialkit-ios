@@ -139,6 +139,8 @@ Drawer behavior:
 
 - `defaultOpen: false` starts closed with only the FAB visible
 - `defaultOpen: true` starts with the drawer open at the medium height
+- the mobile drawer can be dragged between medium and tall states, then dragged down to dismiss
+- short control lists size the drawer to content; longer lists scroll once the drawer reaches its height cap
 - `storageID` namespaces the persisted FAB position so different screens do not collide
 
 `drawer` mode is currently iPhone-first. A dedicated iPad presentation is deferred for now.
@@ -167,6 +169,22 @@ Public behavior:
 - `deletePreset(id:)`
 - `copyInstructionText()`
 
+### `DialStore`
+
+```swift
+DialStore.shared
+```
+
+`DialPanelState` instances automatically register with the shared global store, and `DialRoot` renders whatever is currently active from that store. Most apps do not need to talk to `DialStore` directly, but it is public.
+
+### `DialPreset<Model>`
+
+`presets` is an array of public `DialPreset<Model>` values. Each preset contains:
+
+- `id`
+- `name`
+- `values`
+
 ## Defining Controls
 
 DialKit uses writable key paths into your model. Each control gets a path string and a key path.
@@ -174,10 +192,18 @@ DialKit uses writable key paths into your model. Each control gets a path string
 ```swift
 [
     .slider("opacity", keyPath: \.opacity, range: 0.0...1.0, step: 0.05),
+    .slider("blur", keyPath: \.blur, range: 0.0...40.0, step: 1.0, unit: "pt"),
     .toggle("enabled", keyPath: \.enabled),
     .text("title", keyPath: \.title, placeholder: "Title"),
     .color("fill", keyPath: \.fill),
-    .select("style", keyPath: \.style, options: ["glass", "solid"]),
+    .select(
+        "style",
+        keyPath: \.style,
+        options: [
+            DialOption("glass", label: "Glass"),
+            DialOption("solid", label: "Solid")
+        ]
+    ),
     .spring("spring", keyPath: \.spring),
     .transition("transition", keyPath: \.transition),
     .group("motion", collapsed: false, children: [...]),
@@ -187,7 +213,7 @@ DialKit uses writable key paths into your model. Each control gets a path string
 
 Supported controls:
 
-- `slider`: numeric values backed by `Double`, `Float`, `CGFloat`, or `Int`
+- `slider`: numeric values backed by `Double`, `Float`, `CGFloat`, or `Int`, with optional `step` and `unit`
 - `toggle`: `Bool`
 - `text`: `String`
 - `color`: `String` hex color values
@@ -198,6 +224,17 @@ Supported controls:
 - `action`: callback-only button routed through `onAction`
 
 Paths are also used to generate stable action identifiers. A nested action inside `group("motion")` with `action("shuffle")` is delivered as `motion.shuffle`.
+
+### `DialOption`
+
+`DialOption` is a public helper type for labeled select options:
+
+```swift
+DialOption("glass", label: "Glass")
+DialOption(value: "spring-physics", label: "Physics Spring")
+```
+
+Use `[String]` when the stored value and visible label should match. Use `[DialOption]` when you want a separate stored value and display label.
 
 ## Working With Multiple Panels
 
@@ -282,6 +319,15 @@ DialKit includes two animation-oriented value types.
 
 The spring control can switch between time-based and physics-based editing.
 
+Useful public helpers:
+
+```swift
+let spring = DialSpring.default
+let physics = spring.resolvedPhysics
+let faster = spring.updatingTime(duration: 0.2)
+let heavier = spring.updatingPhysics(mass: 1.5)
+```
+
 ### `DialTransition`
 
 ```swift
@@ -294,6 +340,13 @@ The transition control supports:
 - easing curves via `DialBezier`
 - time-based spring mode
 - physics spring mode
+
+It also exposes a public mode-switching helper:
+
+```swift
+let easing = DialTransition.default.switching(to: .easing)
+let physics = DialTransition.default.switching(to: .advanced)
+```
 
 ## Colors
 
@@ -311,7 +364,7 @@ Example:
 var fill = "#F97316"
 ```
 
-DialKit converts these values to SwiftUI colors internally for the built-in control UI.
+DialKit converts these values to SwiftUI colors internally for the built-in control UI, and the built-in color control preserves alpha when you use `#RRGGBBAA`.
 
 ## Runtime Reconfiguration
 
@@ -336,6 +389,7 @@ When you reconfigure a panel:
 - Add `DialRoot` close to the top of your screen hierarchy so the FAB and drawer can overlay your content.
 - Use a unique `storageID` per screen if you want each screen to remember its own FAB position.
 - Use `inline` mode for settings screens, inspectors, or debug panels that should always stay visible.
+- The built-in slider UI supports both tap-to-edit values and direct drag interaction with step haptics on iPhone.
 - Keep your model small and focused. DialKit works best when each panel represents a coherent group of values.
 - Prefer stable path names because they become labels, nested control identifiers, and action paths.
 
@@ -353,5 +407,7 @@ When you reconfigure a panel:
 - Shared global store for multiple panels
 - Draggable FAB with persisted position per `storageID`
 - Mobile drawer presentation plus inline presentation
+- Content-sized iPhone drawer with medium/tall drag states and shared multi-panel picker
 - Presets with base-state restore and active-preset autosave
+- Built-in copy action, color picker, tap-to-edit sliders, drag guide marks, and slider step haptics
 - Nested groups, spring controls, transition controls, actions, text, toggle, color, select, and slider controls

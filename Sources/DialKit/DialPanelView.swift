@@ -206,6 +206,23 @@ package func dialShouldEmitSliderHaptic(previousValue: Double?, nextValue: Doubl
     return previousValue != nextValue
 }
 
+package func dialAccordionIDs(in controls: [DialResolvedControl]) -> Set<String> {
+    controls.reduce(into: Set<String>()) { ids, control in
+        ids.formUnion(dialAccordionIDs(in: control))
+    }
+}
+
+private func dialAccordionIDs(in control: DialResolvedControl) -> Set<String> {
+    switch control.kind {
+    case let .group(group):
+        return Set([control.id]).union(dialAccordionIDs(in: group.children))
+    case .spring, .transition:
+        return Set([control.id])
+    default:
+        return []
+    }
+}
+
 #if canImport(UIKit)
 package func dialClampedFABCenter(
     _ point: CGPoint,
@@ -549,6 +566,9 @@ private struct DialPanelControlsView: View {
     }
 
     var body: some View {
+        let controls = panel.controls
+        let accordionIDs = dialAccordionIDs(in: controls)
+
         VStack(alignment: .leading, spacing: 0) {
             toolbar
                 .padding(.horizontal, dialDrawerContentInset)
@@ -556,7 +576,7 @@ private struct DialPanelControlsView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 6) {
-                    ForEach(panel.controls) { control in
+                    ForEach(controls) { control in
                         controlView(control)
                     }
                 }
@@ -573,6 +593,12 @@ private struct DialPanelControlsView: View {
         }
         .onPreferenceChange(DialMeasuredHeightKey.self) { newHeight in
             onMeasuredControlsHeight?(newHeight)
+        }
+        .onAppear {
+            panel.pruneAccordionExpanded(validIDs: accordionIDs)
+        }
+        .onChange(of: accordionIDs) { _, newValue in
+            panel.pruneAccordionExpanded(validIDs: newValue)
         }
     }
 
@@ -662,12 +688,12 @@ private struct DialPanelControlsView: View {
         case let .select(select):
             return AnyView(DialSelectRow(title: control.label, options: select.options, selection: Binding(get: select.get, set: select.set)))
         case let .spring(spring):
-            return AnyView(DialSpringControl(title: control.label, control: spring))
+            return AnyView(DialSpringControl(title: control.label, control: spring, isExpanded: accordionBinding(id: control.id, defaultOpen: true)))
         case let .transition(transition):
-            return AnyView(DialTransitionControl(title: control.label, control: transition))
+            return AnyView(DialTransitionControl(title: control.label, control: transition, isExpanded: accordionBinding(id: control.id, defaultOpen: true)))
         case let .group(group):
             return AnyView(
-                DialFolderSection(title: control.label, defaultOpen: !group.collapsed) {
+                DialFolderSection(title: control.label, isExpanded: accordionBinding(id: control.id, defaultOpen: !group.collapsed)) {
                     ForEach(group.children) { child in
                         controlView(child)
                     }
@@ -676,6 +702,13 @@ private struct DialPanelControlsView: View {
         case let .action(action):
             return AnyView(DialActionButton(title: control.label, action: action.trigger))
         }
+    }
+
+    private func accordionBinding(id: String, defaultOpen: Bool) -> Binding<Bool> {
+        Binding(
+            get: { panel.accordionExpanded(for: id, default: defaultOpen) },
+            set: { panel.setAccordionExpanded($0, for: id) }
+        )
     }
 }
 
@@ -1034,22 +1067,25 @@ private final class FABContainerView: UIView {
 
 private struct DialFolderSection<Content: View>: View {
     let title: String
-    let defaultOpen: Bool
+    @Binding var isExpanded: Bool
     let content: Content
 
-    @State private var isExpanded: Bool
+    @State private var measuredContentHeight: CGFloat?
 
-    init(title: String, defaultOpen: Bool, @ViewBuilder content: () -> Content) {
+    init(title: String, isExpanded: Binding<Bool>, @ViewBuilder content: () -> Content) {
         self.title = title
-        self.defaultOpen = defaultOpen
+        self._isExpanded = isExpanded
         self.content = content()
-        self._isExpanded = State(initialValue: defaultOpen)
+    }
+
+    private var folderAnimation: Animation {
+        .spring(response: 0.35, dampingFraction: 0.9)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.88)) {
+                withAnimation(folderAnimation) {
                     isExpanded.toggle()
                 }
             } label: {
@@ -1069,13 +1105,30 @@ private struct DialFolderSection<Content: View>: View {
             }
             .buttonStyle(.plain)
 
-            if isExpanded {
-                VStack(spacing: 6) {
-                    content
-                }
-                .padding(.bottom, 10)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+            VStack(spacing: 6) {
+                content
             }
+            .padding(.bottom, 10)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .preference(key: DialFolderContentHeightKey.self, value: proxy.size.height)
+                }
+            }
+            .frame(height: isExpanded ? measuredContentHeight : 0, alignment: .top)
+            .clipped()
+            .opacity(isExpanded ? 1 : 0)
+            .allowsHitTesting(isExpanded)
+            .accessibilityHidden(!isExpanded)
+            .animation(folderAnimation, value: isExpanded)
+            .animation(folderAnimation, value: measuredContentHeight)
+        }
+        .onPreferenceChange(DialFolderContentHeightKey.self) { newHeight in
+            guard abs((measuredContentHeight ?? 0) - newHeight) > 0.5 else {
+                return
+            }
+
+            measuredContentHeight = newHeight
         }
         .overlay(alignment: .top) {
             Rectangle()
@@ -1088,9 +1141,14 @@ private struct DialFolderSection<Content: View>: View {
                 .frame(height: 1)
         }
         .padding(.vertical, 4)
-        .onChange(of: defaultOpen) { _, newValue in
-            isExpanded = newValue
-        }
+    }
+}
+
+private struct DialFolderContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -1489,9 +1547,10 @@ private struct DialActionButton: View {
 private struct DialSpringControl: View {
     let title: String
     let control: DialResolvedSpring
+    @Binding var isExpanded: Bool
 
     var body: some View {
-        DialFolderSection(title: title, defaultOpen: true) {
+        DialFolderSection(title: title, isExpanded: $isExpanded) {
             SpringVisualization(spring: control.get())
                 .frame(height: 140)
 
@@ -1527,9 +1586,10 @@ private struct DialSpringControl: View {
 private struct DialTransitionControl: View {
     let title: String
     let control: DialResolvedTransition
+    @Binding var isExpanded: Bool
 
     var body: some View {
-        DialFolderSection(title: title, defaultOpen: true) {
+        DialFolderSection(title: title, isExpanded: $isExpanded) {
             switch control.get() {
             case let .easing(_, bezier):
                 EasingVisualization(bezier: bezier)

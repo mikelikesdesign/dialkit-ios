@@ -167,6 +167,29 @@ final class DialKitCoreTests: XCTestCase {
         XCTAssertNotEqual(initialID, state.resolvedControls().last?.id)
     }
 
+    func testAccordionStateSeedsFromDefaultAndRemembersUserChoice() {
+        let panel = AnyDialPanelBox(id: UUID())
+
+        XCTAssertFalse(panel.accordionExpanded(for: "motion|group|true", default: false))
+        XCTAssertFalse(panel.accordionExpanded(for: "motion|group|true", default: true))
+
+        panel.setAccordionExpanded(true, for: "motion|group|true")
+
+        XCTAssertTrue(panel.accordionExpanded(for: "motion|group|true", default: false))
+    }
+
+    func testAccordionStatePrunesStaleIDs() {
+        let panel = AnyDialPanelBox(id: UUID())
+
+        XCTAssertFalse(panel.accordionExpanded(for: "motion|group|false", default: false))
+        XCTAssertTrue(panel.accordionExpanded(for: "spring", default: true))
+
+        panel.pruneAccordionExpanded(validIDs: Set(["spring"]))
+
+        XCTAssertTrue(panel.accordionExpanded(for: "motion|group|false", default: true))
+        XCTAssertTrue(panel.accordionExpanded(for: "spring", default: false))
+    }
+
     func testCopyInstructionIncludesPromptAndJson() {
         let state = makeState()
         let text = state.copyInstructionText()

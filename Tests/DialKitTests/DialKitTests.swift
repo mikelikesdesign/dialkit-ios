@@ -90,6 +90,83 @@ final class DialKitTests: XCTestCase {
         XCTAssertEqual(dialResolvedDrawerWidth(containerWidth: 12), 0)
     }
 
+    func testAccordionIDsCollectAccordionCapableControlsRecursively() {
+        let nestedSpring = DialResolvedControl(
+            path: "motion.spring",
+            label: "Spring",
+            kind: .spring(
+                DialResolvedSpring(
+                    get: { .default },
+                    set: { _ in }
+                )
+            )
+        )
+        let nestedTransition = DialResolvedControl(
+            path: "motion.timing.transition",
+            label: "Transition",
+            kind: .transition(
+                DialResolvedTransition(
+                    get: { .default },
+                    set: { _ in }
+                )
+            )
+        )
+        let nestedGroup = DialResolvedControl(
+            path: "motion.timing",
+            label: "Timing",
+            kind: .group(
+                DialResolvedGroup(
+                    collapsed: true,
+                    children: [nestedTransition]
+                )
+            )
+        )
+        let rootGroup = DialResolvedControl(
+            path: "motion",
+            label: "Motion",
+            kind: .group(
+                DialResolvedGroup(
+                    collapsed: false,
+                    children: [
+                        nestedSpring,
+                        nestedGroup,
+                        DialResolvedControl(
+                            path: "motion.enabled",
+                            label: "Enabled",
+                            kind: .toggle(
+                                DialResolvedToggle(
+                                    get: { true },
+                                    set: { _ in }
+                                )
+                            )
+                        )
+                    ]
+                )
+            )
+        )
+        let title = DialResolvedControl(
+            path: "title",
+            label: "Title",
+            kind: .text(
+                DialResolvedText(
+                    placeholder: "Title",
+                    get: { "DialKit" },
+                    set: { _ in }
+                )
+            )
+        )
+
+        XCTAssertEqual(
+            dialAccordionIDs(in: [rootGroup, title]),
+            Set([
+                "motion|group|false",
+                "motion.spring",
+                "motion.timing|group|true",
+                "motion.timing.transition"
+            ])
+        )
+    }
+
     func testResolvedDrawerHeightUsesIntrinsicHeightForShortContent() {
         let medium = dialResolvedDrawerHeight(
             presentation: .medium,

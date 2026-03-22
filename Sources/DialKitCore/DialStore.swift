@@ -5,6 +5,7 @@ package final class AnyDialPanelBox: ObservableObject, Identifiable {
     package let id: UUID
     package let objectWillChange = ObservableObjectPublisher()
 
+    private var accordionExpandedStates: [String: Bool] = [:]
     private var nameProvider: (() -> String)?
     private var controlsProvider: (() -> [DialResolvedControl])?
     private var presetsProvider: (() -> [DialPresetSummary])?
@@ -27,6 +28,28 @@ package final class AnyDialPanelBox: ObservableObject, Identifiable {
     package var activePresetID: UUID? { activePresetProvider?() }
     package var nextPresetName: String { nextPresetNameProvider?() ?? "Version 2" }
     package var copyInstructionText: String { copyTextProvider?() ?? "" }
+
+    package func accordionExpanded(for id: String, default defaultValue: Bool) -> Bool {
+        if let stored = accordionExpandedStates[id] {
+            return stored
+        }
+
+        accordionExpandedStates[id] = defaultValue
+        return defaultValue
+    }
+
+    package func setAccordionExpanded(_ isExpanded: Bool, for id: String) {
+        guard accordionExpandedStates[id] != isExpanded else {
+            return
+        }
+
+        accordionExpandedStates[id] = isExpanded
+        objectWillChange.send()
+    }
+
+    package func pruneAccordionExpanded(validIDs: Set<String>) {
+        accordionExpandedStates = accordionExpandedStates.filter { validIDs.contains($0.key) }
+    }
 
     package func savePreset(named name: String) {
         savePresetHandler?(name)
