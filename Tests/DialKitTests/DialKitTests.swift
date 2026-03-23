@@ -366,6 +366,13 @@ final class DialKitTests: XCTestCase {
         XCTAssertEqual(dialSnappedSliderValue(1.6, range: 0.0...1.0, step: 0.1), 1.0, accuracy: 0.0001)
     }
 
+    func testSliderSnappingAnchorsStepsToRangeLowerBound() {
+        XCTAssertEqual(dialSnappedSliderValue(1.0, range: 1.0...9.0, step: 2.0), 1.0, accuracy: 0.0001)
+        XCTAssertEqual(dialSnappedSliderValue(2.9, range: 1.0...9.0, step: 2.0), 3.0, accuracy: 0.0001)
+        XCTAssertEqual(dialSnappedSliderValue(5.1, range: 1.0...9.0, step: 2.0), 5.0, accuracy: 0.0001)
+        XCTAssertEqual(dialSnappedSliderValue(8.6, range: 1.0...9.0, step: 2.0), 9.0, accuracy: 0.0001)
+    }
+
     func testSliderHapticHelperOnlyFiresOnStepChange() {
         XCTAssertFalse(dialShouldEmitSliderHaptic(previousValue: nil, nextValue: 0.1))
         XCTAssertFalse(dialShouldEmitSliderHaptic(previousValue: 0.1, nextValue: 0.1))

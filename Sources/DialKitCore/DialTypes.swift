@@ -269,7 +269,7 @@ package func dialStepPrecision(_ step: Double) -> Int {
 
 package func dialRound(_ value: Double, step: Double, within range: ClosedRange<Double>) -> Double {
     let safeStep = max(step, 0.000_001)
-    let stepped = (value / safeStep).rounded() * safeStep
+    let stepped = ((value - range.lowerBound) / safeStep).rounded() * safeStep + range.lowerBound
     let clamped = min(max(stepped, range.lowerBound), range.upperBound)
     let precision = dialStepPrecision(safeStep)
     return Double(String(format: "%0.*f", precision, clamped)) ?? clamped
