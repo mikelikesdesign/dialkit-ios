@@ -313,6 +313,44 @@ final class DialKitTests: XCTestCase {
         )
     }
 
+    func testDrawerControlsBelowCapDoNotScroll() {
+        XCTAssertFalse(
+            dialDrawerControlsShouldScroll(
+                intrinsicContentHeight: 56,
+                maxHeight: 291
+            )
+        )
+    }
+
+    func testDrawerControlsAboveCapRequestScrolling() {
+        XCTAssertTrue(
+            dialDrawerControlsShouldScroll(
+                intrinsicContentHeight: 320,
+                maxHeight: 291
+            )
+        )
+    }
+
+    func testResolvedDrawerControlsViewportHeightUsesIntrinsicHeightForShortContent() {
+        XCTAssertEqual(
+            dialResolvedDrawerControlsViewportHeight(
+                intrinsicContentHeight: 56,
+                maxHeight: 291
+            ),
+            56
+        )
+    }
+
+    func testResolvedDrawerControlsViewportHeightClampsOverflowToCap() {
+        XCTAssertEqual(
+            dialResolvedDrawerControlsViewportHeight(
+                intrinsicContentHeight: 320,
+                maxHeight: 291
+            ),
+            291
+        )
+    }
+
     func testSliderSnappingReturnsSameStepWithinBoundary() {
         XCTAssertEqual(dialSnappedSliderValue(0.11, range: 0.0...1.0, step: 0.1), 0.1, accuracy: 0.0001)
         XCTAssertEqual(dialSnappedSliderValue(0.14, range: 0.0...1.0, step: 0.1), 0.1, accuracy: 0.0001)

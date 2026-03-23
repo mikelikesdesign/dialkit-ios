@@ -199,6 +199,29 @@ package func dialDrawerControlsHeightCap(
     )
 }
 
+package func dialDrawerControlsShouldScroll(
+    intrinsicContentHeight: CGFloat,
+    maxHeight: CGFloat?
+) -> Bool {
+    guard let maxHeight else {
+        return false
+    }
+
+    return max(intrinsicContentHeight, 0) > max(maxHeight, 0) + 0.5
+}
+
+package func dialResolvedDrawerControlsViewportHeight(
+    intrinsicContentHeight: CGFloat,
+    maxHeight: CGFloat?
+) -> CGFloat {
+    let intrinsicContentHeight = max(intrinsicContentHeight, 0)
+    guard let maxHeight else {
+        return intrinsicContentHeight
+    }
+
+    return min(intrinsicContentHeight, max(maxHeight, 0))
+}
+
 package func dialSnappedSliderValue(_ raw: Double, range: ClosedRange<Double>, step: Double) -> Double {
     dialRound(raw, step: step, within: range)
 }
@@ -588,6 +611,7 @@ private struct DialPanelControlsView: View {
     let onMeasuredControlsHeight: ((CGFloat) -> Void)?
 
     @State private var copiedState = false
+    @State private var measuredControlsContentHeight: CGFloat = 0
 
     init(
         panel: AnyDialPanelBox,
@@ -621,31 +645,47 @@ private struct DialPanelControlsView: View {
         )
     }
 
+    private var controlsShouldScroll: Bool {
+        guard measuredControlsContentHeight > 0 else {
+            return maxControlsHeight != nil
+        }
+
+        return dialDrawerControlsShouldScroll(
+            intrinsicContentHeight: measuredControlsContentHeight,
+            maxHeight: maxControlsHeight
+        )
+    }
+
+    private var visibleControlsHeight: CGFloat? {
+        guard measuredControlsContentHeight > 0 else {
+            return maxControlsHeight
+        }
+
+        return dialResolvedDrawerControlsViewportHeight(
+            intrinsicContentHeight: measuredControlsContentHeight,
+            maxHeight: maxControlsHeight
+        )
+    }
+
     var body: some View {
-        let controls = panel.controls
-        let accordionIDs = dialAccordionIDs(in: controls)
+        let accordionIDs = dialAccordionIDs(in: panel.controls)
 
         VStack(alignment: .leading, spacing: 0) {
             toolbar
                 .padding(.horizontal, dialDrawerContentInset)
                 .padding(.bottom, toolbarBottomPadding)
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 6) {
-                    controlList(controls)
-                }
-                .padding(.horizontal, dialDrawerContentInset)
-                .padding(.bottom, contentBottomPadding)
+            controlsViewport
                 .background {
-                    GeometryReader { proxy in
-                        Color.clear
-                            .preference(key: DialMeasuredHeightKey.self, value: proxy.size.height)
-                    }
+                    controlsMeasurementView
                 }
-            }
-            .frame(maxHeight: maxControlsHeight, alignment: .top)
         }
         .onPreferenceChange(DialMeasuredHeightKey.self) { newHeight in
+            guard abs(measuredControlsContentHeight - newHeight) > 0.5 else {
+                return
+            }
+
+            measuredControlsContentHeight = newHeight
             onMeasuredControlsHeight?(newHeight)
         }
         .onAppear {
@@ -654,6 +694,40 @@ private struct DialPanelControlsView: View {
         .onChange(of: accordionIDs) { _, newValue in
             panel.pruneAccordionExpanded(validIDs: newValue)
         }
+    }
+
+    @ViewBuilder
+    private var controlsViewport: some View {
+        if controlsShouldScroll {
+            ScrollView(showsIndicators: false) {
+                controlsContent
+            }
+            .frame(height: visibleControlsHeight, alignment: .top)
+        } else {
+            controlsContent
+        }
+    }
+
+    private var controlsContent: some View {
+        VStack(spacing: 6) {
+            controlList(panel.controls)
+        }
+        .padding(.horizontal, dialDrawerContentInset)
+        .padding(.bottom, contentBottomPadding)
+    }
+
+    private var controlsMeasurementView: some View {
+        controlsContent
+            .fixedSize(horizontal: false, vertical: true)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .preference(key: DialMeasuredHeightKey.self, value: proxy.size.height)
+                }
+            }
+            .hidden()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     private var toolbar: some View {
