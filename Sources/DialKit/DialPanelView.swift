@@ -511,11 +511,6 @@ private struct DialDrawerPanel: View {
             mediumMaxHeight: mediumMaxHeight,
             tallMaxHeight: tallMaxHeight
         )
-        let heightCap = dialDrawerHeightCap(
-            presentation: presentation,
-            mediumMaxHeight: mediumMaxHeight,
-            tallMaxHeight: tallMaxHeight
-        )
         let intrinsicHeight = dialDrawerChromeHeight(panelCount: panels.count) + measuredControlsContentHeight
         let resolvedHeight = dialResolvedDrawerHeight(
             presentation: presentation,
@@ -554,7 +549,6 @@ private struct DialDrawerPanel: View {
         }
         .frame(width: width)
         .frame(height: measuredControlsContentHeight > 0 ? resolvedHeight : nil, alignment: .top)
-        .frame(maxHeight: heightCap, alignment: .top)
         .background {
             DialPanelBackground(cornerRadius: 24)
         }
