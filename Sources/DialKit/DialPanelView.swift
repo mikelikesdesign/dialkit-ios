@@ -234,6 +234,32 @@ package func dialShouldEmitSliderHaptic(previousValue: Double?, nextValue: Doubl
     return previousValue != nextValue
 }
 
+package enum DialSliderGestureDisposition: Equatable {
+    case undecided
+    case slider
+    case scroll
+}
+
+package func dialResolveSliderGestureDisposition(
+    translation: CGSize,
+    activationDistance: CGFloat = 10,
+    horizontalBias: CGFloat = 1.25
+) -> DialSliderGestureDisposition {
+    let horizontalDistance = abs(translation.width)
+    let verticalDistance = abs(translation.height)
+    let totalDistance = hypot(horizontalDistance, verticalDistance)
+
+    guard totalDistance >= activationDistance else {
+        return .undecided
+    }
+
+    if horizontalDistance > verticalDistance * horizontalBias {
+        return .slider
+    }
+
+    return .scroll
+}
+
 package func dialActivePresetName(activePresetID: UUID?, presets: [DialPresetSummary]) -> String {
     presets.first(where: { $0.id == activePresetID })?.name ?? "Version 1"
 }
@@ -1540,12 +1566,151 @@ private struct DialColorRow: View {
     }
 }
 
+#if canImport(UIKit)
+private struct DialSliderInteractionSurface: UIViewRepresentable {
+    let onTap: (CGPoint, CGRect) -> Void
+    let onPanBegan: (CGPoint, CGRect) -> Void
+    let onPanChanged: (CGPoint, CGRect) -> Void
+    let onPanEnded: () -> Void
+
+    func makeUIView(context: Context) -> DialSliderInteractionView {
+        DialSliderInteractionView()
+    }
+
+    func updateUIView(_ uiView: DialSliderInteractionView, context: Context) {
+        uiView.onTap = onTap
+        uiView.onPanBegan = onPanBegan
+        uiView.onPanChanged = onPanChanged
+        uiView.onPanEnded = onPanEnded
+    }
+}
+
+private final class DialSliderInteractionView: UIView, UIGestureRecognizerDelegate {
+    var onTap: ((CGPoint, CGRect) -> Void)?
+    var onPanBegan: ((CGPoint, CGRect) -> Void)?
+    var onPanChanged: ((CGPoint, CGRect) -> Void)?
+    var onPanEnded: (() -> Void)?
+
+    private lazy var tapRecognizer: UITapGestureRecognizer = {
+        let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        recognizer.cancelsTouchesInView = false
+        recognizer.delegate = self
+        return recognizer
+    }()
+
+    private lazy var panRecognizer: DialHorizontalIntentPanGestureRecognizer = {
+        let recognizer = DialHorizontalIntentPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        recognizer.delegate = self
+        return recognizer
+    }()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        addGestureRecognizer(tapRecognizer)
+        addGestureRecognizer(panRecognizer)
+        tapRecognizer.require(toFail: panRecognizer)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        onTap?(recognizer.location(in: self), bounds)
+    }
+
+    @objc private func handlePan(_ recognizer: DialHorizontalIntentPanGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            onPanBegan?(recognizer.currentLocation, bounds)
+        case .changed:
+            onPanChanged?(recognizer.currentLocation, bounds)
+        case .ended, .cancelled:
+            onPanEnded?()
+        default:
+            break
+        }
+    }
+}
+
+private final class DialHorizontalIntentPanGestureRecognizer: UIGestureRecognizer {
+    private(set) var currentLocation: CGPoint = .zero
+
+    private var startLocation: CGPoint = .zero
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard state == .possible, let touch = touches.first, touches.count == 1 else {
+            state = .failed
+            return
+        }
+
+        let location = touch.location(in: view)
+        startLocation = location
+        currentLocation = location
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let touch = touches.first, let view else {
+            state = .failed
+            return
+        }
+
+        currentLocation = touch.location(in: view)
+
+        switch state {
+        case .possible:
+            let translation = CGSize(
+                width: currentLocation.x - startLocation.x,
+                height: currentLocation.y - startLocation.y
+            )
+
+            switch dialResolveSliderGestureDisposition(translation: translation) {
+            case .undecided:
+                break
+            case .slider:
+                state = .began
+            case .scroll:
+                state = .failed
+            }
+        case .began:
+            state = .changed
+        case .changed:
+            break
+        default:
+            break
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        if let touch = touches.first, let view {
+            currentLocation = touch.location(in: view)
+        }
+
+        switch state {
+        case .began, .changed:
+            state = .ended
+        default:
+            state = .failed
+        }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        state = (state == .began || state == .changed) ? .cancelled : .failed
+    }
+
+    override func reset() {
+        currentLocation = .zero
+        startLocation = .zero
+    }
+}
+#endif
+
 private struct DialSliderRow: View {
     let title: String
     let slider: DialResolvedSlider
 
-    @State private var isEditing = false
-    @State private var draft = ""
     @State private var isInteracting = false
     @State private var lastHapticValue: Double?
     #if canImport(UIKit)
@@ -1594,31 +1759,42 @@ private struct DialSliderRow: View {
 
                     Spacer(minLength: 0)
 
-                    if isEditing {
-                        TextField("", text: $draft)
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
-                            .foregroundStyle(Color.white)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 68)
-                            .onSubmit(commitDraft)
-                    } else {
-                        Button {
-                            draft = value.formatted(step: slider.step)
-                            isEditing = true
-                        } label: {
-                            Text(formattedValue)
-                                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                .foregroundStyle(isInteracting ? Color.white : DialTheme.textLabel)
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    Text(formattedValue)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundStyle(isInteracting ? Color.white : DialTheme.textLabel)
                 }
                 .padding(.horizontal, 10)
             }
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            #if canImport(UIKit)
+            .overlay {
+                DialSliderInteractionSurface(
+                    onTap: { location, bounds in
+                        handleTap(at: location.x, width: bounds.width)
+                    },
+                    onPanBegan: { location, bounds in
+                        beginInteraction()
+                        updateValue(at: location.x, width: bounds.width)
+                    },
+                    onPanChanged: { location, bounds in
+                        if !isInteracting {
+                            beginInteraction()
+                        }
+                        updateValue(at: location.x, width: bounds.width)
+                    },
+                    onPanEnded: {
+                        endInteraction()
+                    }
+                )
+            }
+            #else
             .gesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 10)
                     .onChanged { gesture in
+                        guard dialResolveSliderGestureDisposition(translation: gesture.translation) == .slider else {
+                            return
+                        }
+
                         if !isInteracting {
                             beginInteraction()
                         }
@@ -1628,6 +1804,7 @@ private struct DialSliderRow: View {
                         endInteraction()
                     }
             )
+            #endif
         }
         .frame(height: 36)
     }
@@ -1639,9 +1816,16 @@ private struct DialSliderRow: View {
         return value.formatted(step: slider.step)
     }
 
+    private func handleTap(at x: CGFloat, width: CGFloat) {
+        beginInteraction()
+        updateValue(at: x, width: width)
+        endInteraction()
+    }
+
     private func updateValue(at x: CGFloat, width: CGFloat) {
-        let clampedX = min(max(x, 0), width)
-        let fraction = clampedX / width
+        let safeWidth = max(width, 1)
+        let clampedX = min(max(x, 0), safeWidth)
+        let fraction = clampedX / safeWidth
         let raw = slider.range.lowerBound + Double(fraction) * (slider.range.upperBound - slider.range.lowerBound)
         let snapped = dialSnappedSliderValue(raw, range: slider.range, step: slider.step)
 
@@ -1656,18 +1840,7 @@ private struct DialSliderRow: View {
         slider.set(snapped)
     }
 
-    private func commitDraft() {
-        defer { isEditing = false }
-        guard let parsed = Double(draft) else {
-            draft = value.formatted(step: slider.step)
-            return
-        }
-        slider.set(parsed)
-        draft = value.formatted(step: slider.step)
-    }
-
     private func beginInteraction() {
-        isEditing = false
         isInteracting = true
         lastHapticValue = value
         #if canImport(UIKit)
@@ -1678,6 +1851,10 @@ private struct DialSliderRow: View {
     }
 
     private func endInteraction() {
+        guard isInteracting else {
+            return
+        }
+
         isInteracting = false
         lastHapticValue = nil
         #if canImport(UIKit)
