@@ -372,38 +372,6 @@ final class DialKitTests: XCTestCase {
         XCTAssertTrue(dialShouldEmitSliderHaptic(previousValue: 0.1, nextValue: 0.2))
     }
 
-    func testSliderGestureDispositionWaitsForMeaningfulMovement() {
-        XCTAssertEqual(
-            dialResolveSliderGestureDisposition(translation: CGSize(width: 6, height: 5)),
-            .undecided
-        )
-    }
-
-    func testSliderGestureDispositionLocksForHorizontalMovement() {
-        XCTAssertEqual(
-            dialResolveSliderGestureDisposition(translation: CGSize(width: 12, height: 3)),
-            .slider
-        )
-    }
-
-    func testSliderGestureDispositionYieldsToScrollForVerticalMovement() {
-        XCTAssertEqual(
-            dialResolveSliderGestureDisposition(translation: CGSize(width: 3, height: 12)),
-            .scroll
-        )
-    }
-
-    func testSliderGestureDispositionRequiresHorizontalDominanceForDiagonalDrag() {
-        XCTAssertEqual(
-            dialResolveSliderGestureDisposition(translation: CGSize(width: 10, height: 9)),
-            .scroll
-        )
-        XCTAssertEqual(
-            dialResolveSliderGestureDisposition(translation: CGSize(width: 12, height: 9)),
-            .slider
-        )
-    }
-
     func testResolvedPanelSelectionFallsBackToFirstAvailablePanel() {
         let first = UUID()
         let second = UUID()
