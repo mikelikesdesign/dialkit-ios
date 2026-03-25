@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import DialKitCore
 #if canImport(UIKit)
@@ -145,6 +146,31 @@ package func dialResolvedDrawerWidth(containerWidth: CGFloat) -> CGFloat {
     max(containerWidth - (dialDrawerHorizontalInset * 2), 0)
 }
 
+package func dialResolvedKeyboardAvoidanceInset(keyboardOverlap: CGFloat) -> CGFloat {
+    max(keyboardOverlap, 0)
+}
+
+package func dialResolvedDrawerAvailableHeight(containerHeight: CGFloat, keyboardOverlap: CGFloat) -> CGFloat {
+    max(containerHeight - dialResolvedKeyboardAvoidanceInset(keyboardOverlap: keyboardOverlap), 0)
+}
+
+package struct DialDrawerMaximumHeights: Equatable {
+    package let medium: CGFloat
+    package let tall: CGFloat
+}
+
+package func dialResolvedDrawerMaximumHeights(containerHeight: CGFloat, keyboardOverlap: CGFloat) -> DialDrawerMaximumHeights {
+    let availableHeight = dialResolvedDrawerAvailableHeight(
+        containerHeight: containerHeight,
+        keyboardOverlap: keyboardOverlap
+    )
+
+    return DialDrawerMaximumHeights(
+        medium: min(availableHeight * 0.58, 560),
+        tall: min(availableHeight * 0.90, max(availableHeight - 12, 0))
+    )
+}
+
 package func dialDrawerChromeHeight(panelCount: Int) -> CGFloat {
     dialDrawerHandleSectionHeight
         + dialDrawerToolbarSectionHeight
@@ -201,8 +227,14 @@ package func dialDrawerControlsHeightCap(
 
 package func dialDrawerControlsShouldScroll(
     intrinsicContentHeight: CGFloat,
-    maxHeight: CGFloat?
+    maxHeight: CGFloat?,
+    focusedTextEntryID: String? = nil,
+    keyboardOverlap: CGFloat = 0
 ) -> Bool {
+    if focusedTextEntryID != nil || dialResolvedKeyboardAvoidanceInset(keyboardOverlap: keyboardOverlap) > 0.5 {
+        return true
+    }
+
     guard let maxHeight else {
         return false
     }
@@ -220,6 +252,25 @@ package func dialResolvedDrawerControlsViewportHeight(
     }
 
     return min(intrinsicContentHeight, max(maxHeight, 0))
+}
+
+package func dialResolvedControlsBottomInset(baseInset: CGFloat, keyboardOverlap: CGFloat) -> CGFloat {
+    max(baseInset + dialResolvedKeyboardAvoidanceInset(keyboardOverlap: keyboardOverlap), 0)
+}
+
+package func dialShouldPromoteDrawerForFocusedTextEntry(
+    presentation: DialDrawerPresentation,
+    focusedTextEntryID: String?
+) -> Bool {
+    presentation == .medium && focusedTextEntryID != nil
+}
+
+package func dialTextEntryFocusID(for path: String) -> String {
+    path
+}
+
+package func dialBezierTextEntryFocusID(for path: String) -> String {
+    "\(path).bezier"
 }
 
 package func dialSnappedSliderValue(_ raw: Double, range: ClosedRange<Double>, step: Double) -> Double {
@@ -313,6 +364,52 @@ private func dialAccordionIDs(in control: DialResolvedControl) -> Set<String> {
         return []
     }
 }
+
+#if canImport(UIKit)
+@MainActor
+private final class DialKeyboardObserver: ObservableObject {
+    @Published private(set) var overlap: CGFloat = 0
+
+    private var cancellables: Set<AnyCancellable> = []
+
+    init(notificationCenter: NotificationCenter = .default) {
+        notificationCenter.publisher(for: UIResponder.keyboardWillChangeFrameNotification)
+            .merge(with: notificationCenter.publisher(for: UIResponder.keyboardWillHideNotification))
+            .receive(on: RunLoop.main)
+            .sink { [weak self] notification in
+                self?.handleKeyboardNotification(notification)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func handleKeyboardNotification(_ notification: Notification) {
+        let duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+        let nextOverlap: CGFloat
+
+        if notification.name == UIResponder.keyboardWillHideNotification {
+            nextOverlap = 0
+        } else {
+            let endFrame = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect) ?? .null
+            let screenHeight = UIScreen.main.bounds.height
+            nextOverlap = endFrame.isNull ? 0 : max(screenHeight - endFrame.minY, 0)
+        }
+
+        guard abs(overlap - nextOverlap) > 0.5 else {
+            overlap = nextOverlap
+            return
+        }
+
+        withAnimation(.easeOut(duration: duration)) {
+            overlap = nextOverlap
+        }
+    }
+}
+#else
+@MainActor
+private final class DialKeyboardObserver: ObservableObject {
+    @Published private(set) var overlap: CGFloat = 0
+}
+#endif
 
 #if canImport(UIKit)
 package func dialClampedFABCenter(
@@ -413,7 +510,17 @@ struct DialDrawerHost: View {
                             selectedPanelID: $selectedPanelID,
                             presentation: activeDrawerPresentation,
                             containerSize: proxy.size,
-                            onDrag: handleDrawerDrag
+                            onDrag: handleDrawerDrag,
+                            onFocusedTextEntryChanged: { focusedTextEntryID in
+                                guard dialShouldPromoteDrawerForFocusedTextEntry(
+                                    presentation: drawerPresentation,
+                                    focusedTextEntryID: focusedTextEntryID
+                                ) else {
+                                    return
+                                }
+
+                                presentDrawer(.tall)
+                            }
                         )
                         .padding(.horizontal, dialDrawerHorizontalInset)
                         .offset(y: drawerPresentation == .hidden ? proxy.size.height + 24 : 0)
@@ -524,25 +631,30 @@ private struct DialDrawerPanel: View {
     let presentation: DialDrawerPresentation
     let containerSize: CGSize
     let onDrag: (CGFloat) -> Void
+    let onFocusedTextEntryChanged: (String?) -> Void
 
     @State private var measuredControlsContentHeight: CGFloat = 0
+    @StateObject private var keyboardObserver = DialKeyboardObserver()
 
     var body: some View {
         let width = dialResolvedDrawerWidth(containerWidth: containerSize.width)
-        let mediumMaxHeight = min(containerSize.height * 0.58, 560)
-        let tallMaxHeight = min(containerSize.height * 0.90, containerSize.height - 12)
+        let keyboardOverlap = keyboardObserver.overlap
+        let maximumHeights = dialResolvedDrawerMaximumHeights(
+            containerHeight: containerSize.height,
+            keyboardOverlap: keyboardOverlap
+        )
         let controlsHeightCap = dialDrawerControlsHeightCap(
             presentation: presentation,
             panelCount: panels.count,
-            mediumMaxHeight: mediumMaxHeight,
-            tallMaxHeight: tallMaxHeight
+            mediumMaxHeight: maximumHeights.medium,
+            tallMaxHeight: maximumHeights.tall
         )
         let intrinsicHeight = dialDrawerChromeHeight(panelCount: panels.count) + measuredControlsContentHeight
         let resolvedHeight = dialResolvedDrawerHeight(
             presentation: presentation,
             intrinsicContentHeight: intrinsicHeight,
-            mediumMaxHeight: mediumMaxHeight,
-            tallMaxHeight: tallMaxHeight
+            mediumMaxHeight: maximumHeights.medium,
+            tallMaxHeight: maximumHeights.tall
         )
 
         VStack(alignment: .leading, spacing: 0) {
@@ -564,6 +676,8 @@ private struct DialDrawerPanel: View {
                 toolbarBottomPadding: dialDrawerToolbarBottomPadding,
                 contentBottomPadding: dialDrawerContentInset,
                 maxControlsHeight: controlsHeightCap,
+                keyboardOverlap: keyboardOverlap,
+                onFocusedTextEntryChanged: onFocusedTextEntryChanged,
                 onMeasuredControlsHeight: { newHeight in
                     guard abs(measuredControlsContentHeight - newHeight) > 0.5 else {
                         return
@@ -585,6 +699,7 @@ private struct DialDrawerPanel: View {
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .shadow(color: DialTheme.shadow, radius: 32, y: 8)
         .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .offset(y: -dialResolvedKeyboardAvoidanceInset(keyboardOverlap: keyboardOverlap))
         .gesture(
             DragGesture(minimumDistance: 16)
                 .onEnded { gesture in
@@ -628,22 +743,29 @@ private struct DialPanelControlsView: View {
     let toolbarBottomPadding: CGFloat
     let contentBottomPadding: CGFloat
     let maxControlsHeight: CGFloat?
+    let keyboardOverlap: CGFloat
+    let onFocusedTextEntryChanged: ((String?) -> Void)?
     let onMeasuredControlsHeight: ((CGFloat) -> Void)?
 
     @State private var copiedState = false
     @State private var measuredControlsContentHeight: CGFloat = 0
+    @State private var focusedTextEntryID: String?
 
     init(
         panel: AnyDialPanelBox,
         toolbarBottomPadding: CGFloat = 8,
         contentBottomPadding: CGFloat = 12,
         maxControlsHeight: CGFloat? = nil,
+        keyboardOverlap: CGFloat = 0,
+        onFocusedTextEntryChanged: ((String?) -> Void)? = nil,
         onMeasuredControlsHeight: ((CGFloat) -> Void)? = nil
     ) {
         self.panel = panel
         self.toolbarBottomPadding = toolbarBottomPadding
         self.contentBottomPadding = contentBottomPadding
         self.maxControlsHeight = maxControlsHeight
+        self.keyboardOverlap = keyboardOverlap
+        self.onFocusedTextEntryChanged = onFocusedTextEntryChanged
         self.onMeasuredControlsHeight = onMeasuredControlsHeight
     }
 
@@ -667,12 +789,14 @@ private struct DialPanelControlsView: View {
 
     private var controlsShouldScroll: Bool {
         guard measuredControlsContentHeight > 0 else {
-            return maxControlsHeight != nil
+            return maxControlsHeight != nil || focusedTextEntryID != nil || keyboardOverlap > 0.5
         }
 
         return dialDrawerControlsShouldScroll(
             intrinsicContentHeight: measuredControlsContentHeight,
-            maxHeight: maxControlsHeight
+            maxHeight: maxControlsHeight,
+            focusedTextEntryID: focusedTextEntryID,
+            keyboardOverlap: keyboardOverlap
         )
     }
 
@@ -690,29 +814,47 @@ private struct DialPanelControlsView: View {
     var body: some View {
         let accordionIDs = dialAccordionIDs(in: panel.controls)
 
-        VStack(alignment: .leading, spacing: 0) {
-            toolbar
-                .padding(.horizontal, dialDrawerContentInset)
-                .padding(.bottom, toolbarBottomPadding)
+        ScrollViewReader { proxy in
+            VStack(alignment: .leading, spacing: 0) {
+                toolbar
+                    .padding(.horizontal, dialDrawerContentInset)
+                    .padding(.bottom, toolbarBottomPadding)
 
-            controlsViewport
-                .background {
-                    controlsMeasurementView
-                }
-        }
-        .onPreferenceChange(DialMeasuredHeightKey.self) { newHeight in
-            guard abs(measuredControlsContentHeight - newHeight) > 0.5 else {
-                return
+                controlsViewport
+                    .background {
+                        controlsMeasurementView
+                    }
             }
+            .onPreferenceChange(DialMeasuredHeightKey.self) { newHeight in
+                guard abs(measuredControlsContentHeight - newHeight) > 0.5 else {
+                    return
+                }
 
-            measuredControlsContentHeight = newHeight
-            onMeasuredControlsHeight?(newHeight)
-        }
-        .onAppear {
-            panel.pruneAccordionExpanded(validIDs: accordionIDs)
-        }
-        .onChange(of: accordionIDs) { _, newValue in
-            panel.pruneAccordionExpanded(validIDs: newValue)
+                measuredControlsContentHeight = newHeight
+                onMeasuredControlsHeight?(newHeight)
+            }
+            .onAppear {
+                panel.pruneAccordionExpanded(validIDs: accordionIDs)
+            }
+            .onChange(of: accordionIDs) { _, newValue in
+                panel.pruneAccordionExpanded(validIDs: newValue)
+            }
+            .onChange(of: focusedTextEntryID) { _, newValue in
+                onFocusedTextEntryChanged?(newValue)
+
+                guard let newValue else {
+                    return
+                }
+
+                scrollToFocusedTextEntry(newValue, using: proxy)
+            }
+            .onChange(of: keyboardOverlap) { _, newValue in
+                guard let focusedTextEntryID, newValue > 0.5 else {
+                    return
+                }
+
+                scrollToFocusedTextEntry(focusedTextEntryID, using: proxy)
+            }
         }
     }
 
@@ -720,24 +862,31 @@ private struct DialPanelControlsView: View {
     private var controlsViewport: some View {
         if controlsShouldScroll {
             ScrollView(showsIndicators: false) {
-                controlsContent
+                controlsContent(
+                    bottomInset: dialResolvedControlsBottomInset(
+                        baseInset: contentBottomPadding,
+                        keyboardOverlap: keyboardOverlap
+                    ),
+                    measurement: false
+                )
             }
             .frame(height: visibleControlsHeight, alignment: .top)
+            .scrollDismissesKeyboard(.interactively)
         } else {
-            controlsContent
+            controlsContent(bottomInset: contentBottomPadding, measurement: false)
         }
     }
 
-    private var controlsContent: some View {
+    private func controlsContent(bottomInset: CGFloat, measurement: Bool) -> some View {
         VStack(spacing: 6) {
-            controlList(panel.controls)
+            controlList(panel.controls, measurement: measurement)
         }
         .padding(.horizontal, dialDrawerContentInset)
-        .padding(.bottom, contentBottomPadding)
+        .padding(.bottom, bottomInset)
     }
 
     private var controlsMeasurementView: some View {
-        controlsContent
+        controlsContent(bottomInset: contentBottomPadding, measurement: true)
             .fixedSize(horizontal: false, vertical: true)
             .background {
                 GeometryReader { proxy in
@@ -819,11 +968,12 @@ private struct DialPanelControlsView: View {
         }
     }
 
-    private func controlList(_ controls: [DialResolvedControl]) -> some View {
+    private func controlList(_ controls: [DialResolvedControl], measurement: Bool) -> some View {
         ForEach(Array(controls.enumerated()), id: \.element.id) { index, control in
             controlView(
                 control,
-                dividerVisibility: dialSectionDividerVisibility(at: index, in: controls)
+                dividerVisibility: dialSectionDividerVisibility(at: index, in: controls),
+                measurement: measurement
             )
         }
     }
@@ -833,7 +983,8 @@ private struct DialPanelControlsView: View {
         dividerVisibility: DialSectionDividerVisibility = DialSectionDividerVisibility(
             showsTopDivider: false,
             showsBottomDivider: false
-        )
+        ),
+        measurement: Bool
     ) -> AnyView {
         switch control.kind {
         case let .slider(slider):
@@ -841,9 +992,34 @@ private struct DialPanelControlsView: View {
         case let .toggle(toggle):
             return AnyView(DialToggleRow(title: control.label, isOn: Binding(get: toggle.get, set: toggle.set)))
         case let .text(text):
-            return AnyView(DialTextRow(title: control.label, text: Binding(get: text.get, set: text.set), placeholder: text.placeholder ?? ""))
+            let focusID = measurement ? nil : dialTextEntryFocusID(for: control.path)
+            return AnyView(
+                DialTextRow(
+                    title: control.label,
+                    text: Binding(get: text.get, set: text.set),
+                    placeholder: text.placeholder ?? "",
+                    focusID: focusID,
+                    onFocusChange: focusID.map { id in
+                        { isFocused in
+                            handleTextEntryFocusChange(isFocused: isFocused, id: id)
+                        }
+                    }
+                )
+            )
         case let .color(color):
-            return AnyView(DialColorRow(title: control.label, hexValue: Binding(get: color.get, set: color.set)))
+            let focusID = measurement ? nil : dialTextEntryFocusID(for: control.path)
+            return AnyView(
+                DialColorRow(
+                    title: control.label,
+                    hexValue: Binding(get: color.get, set: color.set),
+                    focusID: focusID,
+                    onFocusChange: focusID.map { id in
+                        { isFocused in
+                            handleTextEntryFocusChange(isFocused: isFocused, id: id)
+                        }
+                    }
+                )
+            )
         case let .select(select):
             return AnyView(DialSelectRow(title: control.label, options: select.options, selection: Binding(get: select.get, set: select.set)))
         case let .spring(spring):
@@ -856,12 +1032,19 @@ private struct DialPanelControlsView: View {
                 )
             )
         case let .transition(transition):
+            let focusID = measurement ? nil : dialBezierTextEntryFocusID(for: control.path)
             return AnyView(
                 DialTransitionControl(
                     title: control.label,
                     control: transition,
                     isExpanded: accordionBinding(id: control.id, defaultOpen: true),
-                    dividerVisibility: dividerVisibility
+                    dividerVisibility: dividerVisibility,
+                    bezierFocusID: focusID,
+                    onTextEntryFocusChange: focusID.map { id in
+                        { isFocused in
+                            handleTextEntryFocusChange(isFocused: isFocused, id: id)
+                        }
+                    }
                 )
             )
         case let .group(group):
@@ -872,7 +1055,7 @@ private struct DialPanelControlsView: View {
                     showsTopDivider: dividerVisibility.showsTopDivider,
                     showsBottomDivider: dividerVisibility.showsBottomDivider
                 ) {
-                    controlList(group.children)
+                    controlList(group.children, measurement: measurement)
                 }
             )
         case let .action(action):
@@ -886,6 +1069,22 @@ private struct DialPanelControlsView: View {
             set: { panel.setAccordionExpanded($0, for: id) }
         )
     }
+
+    private func handleTextEntryFocusChange(isFocused: Bool, id: String) {
+        if isFocused {
+            focusedTextEntryID = id
+        } else if focusedTextEntryID == id {
+            focusedTextEntryID = nil
+        }
+    }
+
+    private func scrollToFocusedTextEntry(_ id: String, using proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(id, anchor: .bottom)
+            }
+        }
+    }
 }
 
 struct DialPanelContainer: View {
@@ -894,6 +1093,7 @@ struct DialPanelContainer: View {
     let inline: Bool
 
     @State private var isOpen: Bool
+    @StateObject private var keyboardObserver = DialKeyboardObserver()
 
     init(panel: AnyDialPanelBox, defaultOpen: Bool, inline: Bool) {
         self.panel = panel
@@ -945,7 +1145,10 @@ struct DialPanelContainer: View {
                 .padding(.top, 12)
                 .padding(.bottom, 8)
 
-            DialPanelControlsView(panel: panel)
+            DialPanelControlsView(
+                panel: panel,
+                keyboardOverlap: keyboardObserver.overlap
+            )
         }
         .frame(width: 280)
         .background {
@@ -1011,6 +1214,17 @@ private struct DialPanelBackground: View {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(.ultraThinMaterial.opacity(0.45))
             )
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func dialTextEntryRowID(_ id: String?) -> some View {
+        if let id {
+            self.id(id)
+        } else {
+            self
+        }
     }
 }
 
@@ -1474,6 +1688,10 @@ private struct DialTextRow: View {
     let title: String
     @Binding var text: String
     let placeholder: String
+    let focusID: String?
+    let onFocusChange: ((Bool) -> Void)?
+
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1487,22 +1705,32 @@ private struct DialTextRow: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(DialTheme.textLabel)
                 .tint(.white)
+                .focused($isFocused)
         }
         .frame(height: 36)
         .padding(.horizontal, 12)
         .background(DialRowBackground(cornerRadius: 8))
+        .dialTextEntryRowID(focusID)
+        .onChange(of: isFocused) { _, newValue in
+            onFocusChange?(newValue)
+        }
     }
 }
 
 private struct DialColorRow: View {
     let title: String
     @Binding var hexValue: String
+    let focusID: String?
+    let onFocusChange: ((Bool) -> Void)?
 
     @State private var draft: String
+    @FocusState private var isFocused: Bool
 
-    init(title: String, hexValue: Binding<String>) {
+    init(title: String, hexValue: Binding<String>, focusID: String? = nil, onFocusChange: ((Bool) -> Void)? = nil) {
         self.title = title
         self._hexValue = hexValue
+        self.focusID = focusID
+        self.onFocusChange = onFocusChange
         self._draft = State(initialValue: hexValue.wrappedValue.uppercased())
     }
 
@@ -1532,6 +1760,7 @@ private struct DialColorRow: View {
                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                 .foregroundStyle(DialTheme.textLabel)
                 .frame(width: 88)
+                .focused($isFocused)
                 .onChange(of: hexValue) { _, newValue in
                     draft = newValue.uppercased()
                 }
@@ -1544,6 +1773,10 @@ private struct DialColorRow: View {
         .frame(height: 36)
         .padding(.horizontal, 12)
         .background(DialRowBackground(cornerRadius: 8))
+        .dialTextEntryRowID(focusID)
+        .onChange(of: isFocused) { _, newValue in
+            onFocusChange?(newValue)
+        }
     }
 
     private func commitDraft() {
@@ -1935,6 +2168,8 @@ private struct DialTransitionControl: View {
     let control: DialResolvedTransition
     @Binding var isExpanded: Bool
     let dividerVisibility: DialSectionDividerVisibility
+    let bezierFocusID: String?
+    let onTextEntryFocusChange: ((Bool) -> Void)?
 
     var body: some View {
         DialFolderSection(
@@ -1970,7 +2205,11 @@ private struct DialTransitionControl: View {
                 DialSliderRow(title: "x2", slider: slider(range: 0...1, step: 0.01, get: { bezier.x2 }, set: { updateBezier(x2: $0) }))
                 DialSliderRow(title: "y2", slider: slider(range: -1...2, step: 0.01, get: { bezier.y2 }, set: { updateBezier(y2: $0) }))
                 DialSliderRow(title: "Duration", slider: slider(range: 0.1...2, step: 0.05, unit: "s", get: { duration }, set: { updateDuration($0) }))
-                DialBezierRow(bezier: bezier) { newBezier in
+                DialBezierRow(
+                    bezier: bezier,
+                    focusID: bezierFocusID,
+                    onFocusChange: onTextEntryFocusChange
+                ) { newBezier in
                     control.set(.easing(duration: duration, bezier: newBezier))
                 }
             case let .spring(spring):
@@ -2029,13 +2268,22 @@ private struct DialTransitionControl: View {
 
 private struct DialBezierRow: View {
     let bezier: DialBezier
+    let focusID: String?
+    let onFocusChange: ((Bool) -> Void)?
     let onChange: (DialBezier) -> Void
 
     @State private var draft: String
-    @State private var isEditing = false
+    @FocusState private var isFocused: Bool
 
-    init(bezier: DialBezier, onChange: @escaping (DialBezier) -> Void) {
+    init(
+        bezier: DialBezier,
+        focusID: String? = nil,
+        onFocusChange: ((Bool) -> Void)? = nil,
+        onChange: @escaping (DialBezier) -> Void
+    ) {
         self.bezier = bezier
+        self.focusID = focusID
+        self.onFocusChange = onFocusChange
         self.onChange = onChange
         self._draft = State(initialValue: Self.format(bezier))
     }
@@ -2050,22 +2298,23 @@ private struct DialBezierRow: View {
                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                 .multilineTextAlignment(.trailing)
                 .foregroundStyle(DialTheme.textLabel)
-                .onTapGesture {
-                    isEditing = true
-                }
+                .focused($isFocused)
                 .onSubmit(commit)
                 .onChange(of: Self.format(bezier)) { _, newValue in
-                    guard !isEditing else { return }
+                    guard !isFocused else { return }
                     draft = newValue
                 }
         }
         .frame(height: 36)
         .padding(.horizontal, 12)
         .background(DialRowBackground(cornerRadius: 8))
+        .dialTextEntryRowID(focusID)
+        .onChange(of: isFocused) { _, newValue in
+            onFocusChange?(newValue)
+        }
     }
 
     private func commit() {
-        defer { isEditing = false }
         let parts = draft.split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) }
         guard parts.count == 4,
               let x1 = parts[0],

@@ -90,6 +90,47 @@ final class DialKitTests: XCTestCase {
         XCTAssertEqual(dialResolvedDrawerWidth(containerWidth: 12), 0)
     }
 
+    func testKeyboardInsetAndAvailableDrawerHeightClampAtZero() {
+        XCTAssertEqual(dialResolvedKeyboardAvoidanceInset(keyboardOverlap: 180), 180)
+        XCTAssertEqual(dialResolvedKeyboardAvoidanceInset(keyboardOverlap: -20), 0)
+        XCTAssertEqual(
+            dialResolvedDrawerAvailableHeight(containerHeight: 640, keyboardOverlap: 216),
+            424
+        )
+        XCTAssertEqual(
+            dialResolvedDrawerAvailableHeight(containerHeight: 120, keyboardOverlap: 180),
+            0
+        )
+    }
+
+    func testResolvedDrawerMaximumHeightsUseKeyboardAdjustedAvailableHeight() {
+        let heights = dialResolvedDrawerMaximumHeights(containerHeight: 640, keyboardOverlap: 216)
+
+        XCTAssertEqual(heights.medium, 245.92, accuracy: 0.001)
+        XCTAssertEqual(heights.tall, 381.6, accuracy: 0.001)
+    }
+
+    func testFocusedTextEntryPromotesOnlyMediumDrawer() {
+        XCTAssertTrue(
+            dialShouldPromoteDrawerForFocusedTextEntry(
+                presentation: .medium,
+                focusedTextEntryID: "title"
+            )
+        )
+        XCTAssertFalse(
+            dialShouldPromoteDrawerForFocusedTextEntry(
+                presentation: .tall,
+                focusedTextEntryID: "title"
+            )
+        )
+        XCTAssertFalse(
+            dialShouldPromoteDrawerForFocusedTextEntry(
+                presentation: .medium,
+                focusedTextEntryID: nil
+            )
+        )
+    }
+
     func testActivePresetNameFallsBackToVersionOneWhenNoPresetIsSelected() {
         let first = DialPresetSummary(id: UUID(), name: "Version 2")
 
@@ -328,6 +369,34 @@ final class DialKitTests: XCTestCase {
                 intrinsicContentHeight: 320,
                 maxHeight: 291
             )
+        )
+    }
+
+    func testDrawerControlsRequestScrollingWhileTextEntryIsFocused() {
+        XCTAssertTrue(
+            dialDrawerControlsShouldScroll(
+                intrinsicContentHeight: 56,
+                maxHeight: nil,
+                focusedTextEntryID: "title"
+            )
+        )
+        XCTAssertTrue(
+            dialDrawerControlsShouldScroll(
+                intrinsicContentHeight: 56,
+                maxHeight: 291,
+                keyboardOverlap: 240
+            )
+        )
+    }
+
+    func testResolvedControlsBottomInsetAddsKeyboardInsetWithoutGoingNegative() {
+        XCTAssertEqual(
+            dialResolvedControlsBottomInset(baseInset: 12, keyboardOverlap: 216),
+            228
+        )
+        XCTAssertEqual(
+            dialResolvedControlsBottomInset(baseInset: 12, keyboardOverlap: -40),
+            12
         )
     }
 
