@@ -679,6 +679,7 @@ struct DialDrawerHost: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea()
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .onAppear {
             selectedPanelID = dialResolvedPanelSelection(current: selectedPanelID, available: store.panels.map(\.id))
         }
