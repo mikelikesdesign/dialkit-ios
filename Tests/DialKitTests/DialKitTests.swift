@@ -143,6 +143,36 @@ final class DialKitTests: XCTestCase {
         )
     }
 
+    func testResolvedDrawerPresentationForTextEntryForcesTallOnlyForActiveDrawerEditing() {
+        XCTAssertEqual(
+            dialResolvedDrawerPresentationForTextEntry(
+                presentation: .medium,
+                textEntryBehavior: .drawer,
+                focusedTextEntryID: "title",
+                keyboardOverlap: 216
+            ),
+            .tall
+        )
+        XCTAssertEqual(
+            dialResolvedDrawerPresentationForTextEntry(
+                presentation: .medium,
+                textEntryBehavior: .drawer,
+                focusedTextEntryID: nil,
+                keyboardOverlap: 216
+            ),
+            .medium
+        )
+        XCTAssertEqual(
+            dialResolvedDrawerPresentationForTextEntry(
+                presentation: .hidden,
+                textEntryBehavior: .drawer,
+                focusedTextEntryID: "title",
+                keyboardOverlap: 216
+            ),
+            .hidden
+        )
+    }
+
     func testActivePresetNameFallsBackToVersionOneWhenNoPresetIsSelected() {
         let first = DialPresetSummary(id: UUID(), name: "Version 2")
 
