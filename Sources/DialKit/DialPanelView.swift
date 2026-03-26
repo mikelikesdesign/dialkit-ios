@@ -251,10 +251,26 @@ package func dialResolvedDrawerHeight(
     presentation: DialDrawerPresentation,
     intrinsicContentHeight: CGFloat,
     mediumMaxHeight: CGFloat,
-    tallMaxHeight: CGFloat
+    tallMaxHeight: CGFloat,
+    textEntryBehavior: DialTextEntryBehavior = .standard,
+    focusedTextEntryID: String? = nil,
+    keyboardOverlap: CGFloat = 0
 ) -> CGFloat {
     guard presentation != .hidden else {
         return 0
+    }
+
+    if presentation == .tall,
+       dialDrawerHasActiveKeyboardTextEntry(
+        behavior: textEntryBehavior,
+        focusedTextEntryID: focusedTextEntryID,
+        keyboardOverlap: keyboardOverlap
+       ) {
+        return dialDrawerHeightCap(
+            presentation: presentation,
+            mediumMaxHeight: mediumMaxHeight,
+            tallMaxHeight: tallMaxHeight
+        )
     }
 
     return min(max(intrinsicContentHeight, 0), dialDrawerHeightCap(
@@ -299,11 +315,22 @@ package func dialDrawerControlsShouldScroll(
 
 package func dialResolvedDrawerControlsViewportHeight(
     intrinsicContentHeight: CGFloat,
-    maxHeight: CGFloat?
+    maxHeight: CGFloat?,
+    textEntryBehavior: DialTextEntryBehavior = .standard,
+    focusedTextEntryID: String? = nil,
+    keyboardOverlap: CGFloat = 0
 ) -> CGFloat {
     let intrinsicContentHeight = max(intrinsicContentHeight, 0)
     guard let maxHeight else {
         return intrinsicContentHeight
+    }
+
+    if dialDrawerHasActiveKeyboardTextEntry(
+        behavior: textEntryBehavior,
+        focusedTextEntryID: focusedTextEntryID,
+        keyboardOverlap: keyboardOverlap
+    ) {
+        return max(maxHeight, 0)
     }
 
     return min(intrinsicContentHeight, max(maxHeight, 0))
@@ -771,7 +798,10 @@ private struct DialDrawerPanel: View {
             presentation: presentation,
             intrinsicContentHeight: intrinsicHeight,
             mediumMaxHeight: maximumHeights.medium,
-            tallMaxHeight: maximumHeights.tall
+            tallMaxHeight: maximumHeights.tall,
+            textEntryBehavior: .drawer,
+            focusedTextEntryID: focusedTextEntryID,
+            keyboardOverlap: keyboardOverlap
         )
 
         VStack(alignment: .leading, spacing: 0) {
@@ -931,7 +961,10 @@ private struct DialPanelControlsView: View {
 
         return dialResolvedDrawerControlsViewportHeight(
             intrinsicContentHeight: measuredControlsContentHeight,
-            maxHeight: maxControlsHeight
+            maxHeight: maxControlsHeight,
+            textEntryBehavior: textEntryBehavior,
+            focusedTextEntryID: focusedTextEntryID,
+            keyboardOverlap: keyboardOverlap
         )
     }
 
