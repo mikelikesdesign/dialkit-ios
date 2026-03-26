@@ -110,6 +110,18 @@ final class DialKitTests: XCTestCase {
         XCTAssertEqual(heights.tall, 381.6, accuracy: 0.001)
     }
 
+    func testResolvedDrawerMaximumHeightsUseNearlyAllAvailableHeightWhileDrawerTextEntryIsActive() {
+        let heights = dialResolvedDrawerMaximumHeights(
+            containerHeight: 640,
+            keyboardOverlap: 216,
+            textEntryBehavior: .drawer,
+            focusedTextEntryID: "title"
+        )
+
+        XCTAssertEqual(heights.medium, 245.92, accuracy: 0.001)
+        XCTAssertEqual(heights.tall, 412, accuracy: 0.001)
+    }
+
     func testFocusedTextEntryPromotesOnlyMediumDrawer() {
         XCTAssertTrue(
             dialShouldPromoteDrawerForFocusedTextEntry(
@@ -397,6 +409,45 @@ final class DialKitTests: XCTestCase {
         XCTAssertEqual(
             dialResolvedControlsBottomInset(baseInset: 12, keyboardOverlap: -40),
             12
+        )
+    }
+
+    func testResolvedControlsBottomInsetUsesFixedRevealInsetWhileDrawerTextEntryIsActive() {
+        XCTAssertEqual(
+            dialResolvedControlsBottomInset(
+                baseInset: 12,
+                keyboardOverlap: 216,
+                textEntryBehavior: .drawer,
+                focusedTextEntryID: "title"
+            ),
+            172
+        )
+    }
+
+    func testResolvedTextEntryScrollTargetUsesDrawerEditingAnchorOnlyForDrawerEditing() {
+        XCTAssertEqual(
+            dialResolvedTextEntryScrollTarget(
+                textEntryBehavior: .standard,
+                focusedTextEntryID: "title",
+                keyboardOverlap: 216
+            ),
+            .bottom
+        )
+        XCTAssertEqual(
+            dialResolvedTextEntryScrollTarget(
+                textEntryBehavior: .drawer,
+                focusedTextEntryID: nil,
+                keyboardOverlap: 216
+            ),
+            .bottom
+        )
+        XCTAssertEqual(
+            dialResolvedTextEntryScrollTarget(
+                textEntryBehavior: .drawer,
+                focusedTextEntryID: "title",
+                keyboardOverlap: 216
+            ),
+            .drawerEditing
         )
     }
 
