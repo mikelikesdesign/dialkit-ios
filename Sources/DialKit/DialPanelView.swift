@@ -156,12 +156,60 @@ package func dialResolvedDrawerAvailableHeight(containerHeight: CGFloat, keyboar
     max(containerHeight - dialResolvedKeyboardAvoidanceInset(keyboardOverlap: keyboardOverlap), 0)
 }
 
+package enum DialTextEntryBehavior: Equatable {
+    case standard
+    case drawer
+}
+
+package enum DialTextEntryScrollTarget: Equatable {
+    case bottom
+    case drawerEditing
+}
+
+private let dialDrawerTopMargin: CGFloat = 12
+private let dialDrawerEditingRevealInset: CGFloat = 160
+
 package struct DialDrawerMaximumHeights: Equatable {
     package let medium: CGFloat
     package let tall: CGFloat
 }
 
-package func dialResolvedDrawerMaximumHeights(containerHeight: CGFloat, keyboardOverlap: CGFloat) -> DialDrawerMaximumHeights {
+package func dialDrawerHasActiveKeyboardTextEntry(
+    behavior: DialTextEntryBehavior,
+    focusedTextEntryID: String?,
+    keyboardOverlap: CGFloat
+) -> Bool {
+    behavior == .drawer
+        && focusedTextEntryID != nil
+        && dialResolvedKeyboardAvoidanceInset(keyboardOverlap: keyboardOverlap) > 0.5
+}
+
+package func dialResolvedDrawerTallMaximumHeight(
+    availableHeight: CGFloat,
+    keyboardOverlap: CGFloat,
+    textEntryBehavior: DialTextEntryBehavior = .standard,
+    focusedTextEntryID: String? = nil
+) -> CGFloat {
+    let availableHeight = max(availableHeight, 0)
+    let defaultHeight = min(availableHeight * 0.90, max(availableHeight - dialDrawerTopMargin, 0))
+
+    guard dialDrawerHasActiveKeyboardTextEntry(
+        behavior: textEntryBehavior,
+        focusedTextEntryID: focusedTextEntryID,
+        keyboardOverlap: keyboardOverlap
+    ) else {
+        return defaultHeight
+    }
+
+    return max(availableHeight - dialDrawerTopMargin, 0)
+}
+
+package func dialResolvedDrawerMaximumHeights(
+    containerHeight: CGFloat,
+    keyboardOverlap: CGFloat,
+    textEntryBehavior: DialTextEntryBehavior = .standard,
+    focusedTextEntryID: String? = nil
+) -> DialDrawerMaximumHeights {
     let availableHeight = dialResolvedDrawerAvailableHeight(
         containerHeight: containerHeight,
         keyboardOverlap: keyboardOverlap
@@ -169,7 +217,12 @@ package func dialResolvedDrawerMaximumHeights(containerHeight: CGFloat, keyboard
 
     return DialDrawerMaximumHeights(
         medium: min(availableHeight * 0.58, 560),
-        tall: min(availableHeight * 0.90, max(availableHeight - 12, 0))
+        tall: dialResolvedDrawerTallMaximumHeight(
+            availableHeight: availableHeight,
+            keyboardOverlap: keyboardOverlap,
+            textEntryBehavior: textEntryBehavior,
+            focusedTextEntryID: focusedTextEntryID
+        )
     )
 }
 
@@ -256,8 +309,39 @@ package func dialResolvedDrawerControlsViewportHeight(
     return min(intrinsicContentHeight, max(maxHeight, 0))
 }
 
-package func dialResolvedControlsBottomInset(baseInset: CGFloat, keyboardOverlap: CGFloat) -> CGFloat {
-    max(baseInset + dialResolvedKeyboardAvoidanceInset(keyboardOverlap: keyboardOverlap), 0)
+package func dialResolvedControlsBottomInset(
+    baseInset: CGFloat,
+    keyboardOverlap: CGFloat,
+    textEntryBehavior: DialTextEntryBehavior = .standard,
+    focusedTextEntryID: String? = nil
+) -> CGFloat {
+    let baseInset = max(baseInset, 0)
+
+    guard dialDrawerHasActiveKeyboardTextEntry(
+        behavior: textEntryBehavior,
+        focusedTextEntryID: focusedTextEntryID,
+        keyboardOverlap: keyboardOverlap
+    ) else {
+        return max(baseInset + dialResolvedKeyboardAvoidanceInset(keyboardOverlap: keyboardOverlap), 0)
+    }
+
+    return baseInset + dialDrawerEditingRevealInset
+}
+
+package func dialResolvedTextEntryScrollTarget(
+    textEntryBehavior: DialTextEntryBehavior = .standard,
+    focusedTextEntryID: String? = nil,
+    keyboardOverlap: CGFloat = 0
+) -> DialTextEntryScrollTarget {
+    guard dialDrawerHasActiveKeyboardTextEntry(
+        behavior: textEntryBehavior,
+        focusedTextEntryID: focusedTextEntryID,
+        keyboardOverlap: keyboardOverlap
+    ) else {
+        return .bottom
+    }
+
+    return .drawerEditing
 }
 
 package func dialShouldPromoteDrawerForFocusedTextEntry(
@@ -664,6 +748,7 @@ private struct DialDrawerPanel: View {
     let onFocusedTextEntryChanged: (String?) -> Void
 
     @State private var measuredControlsContentHeight: CGFloat = 0
+    @State private var focusedTextEntryID: String?
     @StateObject private var keyboardObserver = DialKeyboardObserver()
 
     var body: some View {
@@ -671,7 +756,9 @@ private struct DialDrawerPanel: View {
         let keyboardOverlap = keyboardObserver.overlap
         let maximumHeights = dialResolvedDrawerMaximumHeights(
             containerHeight: containerSize.height,
-            keyboardOverlap: keyboardOverlap
+            keyboardOverlap: keyboardOverlap,
+            textEntryBehavior: .drawer,
+            focusedTextEntryID: focusedTextEntryID
         )
         let controlsHeightCap = dialDrawerControlsHeightCap(
             presentation: presentation,
@@ -707,7 +794,11 @@ private struct DialDrawerPanel: View {
                 contentBottomPadding: dialDrawerContentInset,
                 maxControlsHeight: controlsHeightCap,
                 keyboardOverlap: keyboardOverlap,
-                onFocusedTextEntryChanged: onFocusedTextEntryChanged,
+                textEntryBehavior: .drawer,
+                onFocusedTextEntryChanged: { newValue in
+                    focusedTextEntryID = newValue
+                    onFocusedTextEntryChanged(newValue)
+                },
                 onMeasuredControlsHeight: { newHeight in
                     guard abs(measuredControlsContentHeight - newHeight) > 0.5 else {
                         return
@@ -774,6 +865,7 @@ private struct DialPanelControlsView: View {
     let contentBottomPadding: CGFloat
     let maxControlsHeight: CGFloat?
     let keyboardOverlap: CGFloat
+    let textEntryBehavior: DialTextEntryBehavior
     let onFocusedTextEntryChanged: ((String?) -> Void)?
     let onMeasuredControlsHeight: ((CGFloat) -> Void)?
 
@@ -787,6 +879,7 @@ private struct DialPanelControlsView: View {
         contentBottomPadding: CGFloat = 12,
         maxControlsHeight: CGFloat? = nil,
         keyboardOverlap: CGFloat = 0,
+        textEntryBehavior: DialTextEntryBehavior = .standard,
         onFocusedTextEntryChanged: ((String?) -> Void)? = nil,
         onMeasuredControlsHeight: ((CGFloat) -> Void)? = nil
     ) {
@@ -795,6 +888,7 @@ private struct DialPanelControlsView: View {
         self.contentBottomPadding = contentBottomPadding
         self.maxControlsHeight = maxControlsHeight
         self.keyboardOverlap = keyboardOverlap
+        self.textEntryBehavior = textEntryBehavior
         self.onFocusedTextEntryChanged = onFocusedTextEntryChanged
         self.onMeasuredControlsHeight = onMeasuredControlsHeight
     }
@@ -895,7 +989,9 @@ private struct DialPanelControlsView: View {
                 controlsContent(
                     bottomInset: dialResolvedControlsBottomInset(
                         baseInset: contentBottomPadding,
-                        keyboardOverlap: keyboardOverlap
+                        keyboardOverlap: keyboardOverlap,
+                        textEntryBehavior: textEntryBehavior,
+                        focusedTextEntryID: focusedTextEntryID
                     ),
                     measurement: false
                 )
@@ -1109,9 +1205,15 @@ private struct DialPanelControlsView: View {
     }
 
     private func scrollToFocusedTextEntry(_ id: String, using proxy: ScrollViewProxy) {
+        let target = dialResolvedTextEntryScrollTarget(
+            textEntryBehavior: textEntryBehavior,
+            focusedTextEntryID: id,
+            keyboardOverlap: keyboardOverlap
+        )
+
         DispatchQueue.main.async {
             withAnimation(.easeInOut(duration: 0.2)) {
-                proxy.scrollTo(id, anchor: .bottom)
+                proxy.scrollTo(id, anchor: target.anchor)
             }
         }
     }
@@ -1282,6 +1384,17 @@ private extension View {
         #else
         self
         #endif
+    }
+}
+
+private extension DialTextEntryScrollTarget {
+    var anchor: UnitPoint {
+        switch self {
+        case .bottom:
+            return .bottom
+        case .drawerEditing:
+            return .center
+        }
     }
 }
 
