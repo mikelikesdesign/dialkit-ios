@@ -739,32 +739,32 @@ private struct DialDrawerPanel: View {
     }
 
     private var panelPicker: some View {
-        HStack(spacing: 0) {
-            Menu {
-                ForEach(panels) { candidate in
-                    Button(candidate.name) {
-                        selectedPanelID = candidate.id
-                    }
+        Menu {
+            ForEach(panels) { candidate in
+                Button(candidate.name) {
+                    selectedPanelID = candidate.id
                 }
-            } label: {
-                HStack(spacing: 8) {
-                    Text(panel.name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(DialTheme.textRoot)
-                        .lineLimit(1)
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(DialTheme.textLabel.opacity(0.8))
-                }
-                .frame(height: 32)
-                .padding(.horizontal, 10)
-                .background(DialRowBackground(cornerRadius: 8))
             }
-            .buttonStyle(.plain)
+        } label: {
+            HStack(spacing: 8) {
+                Text(panel.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DialTheme.textRoot)
+                    .lineLimit(1)
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(DialTheme.textLabel.opacity(0.8))
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 32)
+            .padding(.horizontal, 10)
+            .background(DialRowBackground(cornerRadius: 8))
         }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
     }
 }
 
