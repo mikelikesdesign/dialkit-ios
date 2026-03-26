@@ -345,6 +345,21 @@ final class DialKitTests: XCTestCase {
         )
     }
 
+    func testResolvedDrawerHeightUsesTallCapWhileDrawerTextEntryIsActive() {
+        XCTAssertEqual(
+            dialResolvedDrawerHeight(
+                presentation: .tall,
+                intrinsicContentHeight: 220,
+                mediumMaxHeight: 360,
+                tallMaxHeight: 620,
+                textEntryBehavior: .drawer,
+                focusedTextEntryID: "title",
+                keyboardOverlap: 216
+            ),
+            620
+        )
+    }
+
     func testDrawerControlsHeightCapSubtractsChromeOnce() {
         XCTAssertEqual(
             dialDrawerControlsHeightCap(
@@ -458,6 +473,19 @@ final class DialKitTests: XCTestCase {
                 maxHeight: 291
             ),
             56
+        )
+    }
+
+    func testResolvedDrawerControlsViewportHeightUsesFullCapWhileDrawerTextEntryIsActive() {
+        XCTAssertEqual(
+            dialResolvedDrawerControlsViewportHeight(
+                intrinsicContentHeight: 56,
+                maxHeight: 291,
+                textEntryBehavior: .drawer,
+                focusedTextEntryID: "title",
+                keyboardOverlap: 216
+            ),
+            291
         )
     }
 
