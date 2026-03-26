@@ -226,6 +226,11 @@ public struct DialPreset<Model: Codable & Equatable>: Identifiable, Equatable, C
 package struct DialPresetSummary: Identifiable, Equatable {
     package let id: UUID
     package let name: String
+
+    package init(id: UUID, name: String) {
+        self.id = id
+        self.name = name
+    }
 }
 
 package func dialFormattedLabel(_ path: String) -> String {

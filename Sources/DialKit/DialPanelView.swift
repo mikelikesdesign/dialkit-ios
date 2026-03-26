@@ -3,6 +3,8 @@ import SwiftUI
 import DialKitCore
 #if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
 #endif
 
 private enum DialTheme {
@@ -533,13 +535,7 @@ struct DialDrawerHost: View {
                         Color.clear
                             .allowsHitTesting(false)
 
-                        DraggableFABOverlay(
-                            containerSize: proxy.size,
-                            safeAreaInsets: proxy.safeAreaInsets.uiEdgeInsets,
-                            initialPosition: position,
-                            position: $fabPosition,
-                            action: { presentDrawer(.medium) }
-                        )
+                        fabOverlay(in: proxy)
                     }
                     .ignoresSafeArea()
                     .transition(.opacity)
@@ -621,6 +617,40 @@ struct DialDrawerHost: View {
 
     private var fabAppearanceAnimation: Animation {
         .spring(response: 0.22, dampingFraction: 0.9)
+    }
+
+    @ViewBuilder
+    private func fabOverlay(in proxy: GeometryProxy) -> some View {
+        #if canImport(UIKit)
+        DraggableFABOverlay(
+            containerSize: proxy.size,
+            safeAreaInsets: proxy.safeAreaInsets.uiEdgeInsets,
+            initialPosition: position,
+            position: $fabPosition,
+            action: { presentDrawer(.medium) }
+        )
+        #else
+        Button {
+            presentDrawer(.medium)
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(DialTheme.textRoot)
+                .frame(width: 56, height: 56)
+                .background(Circle().fill(DialTheme.panelBackground))
+                .overlay {
+                    Circle().stroke(DialTheme.border, lineWidth: 1)
+                }
+                .shadow(color: DialTheme.shadow, radius: 18, y: 6)
+        }
+        .buttonStyle(.plain)
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: .infinity,
+            alignment: dialFallbackFABAlignment(for: position)
+        )
+        .padding(8)
+        #endif
     }
 }
 
@@ -871,7 +901,7 @@ private struct DialPanelControlsView: View {
                 )
             }
             .frame(height: visibleControlsHeight, alignment: .top)
-            .scrollDismissesKeyboard(.interactively)
+            .dialKeyboardDismissBehavior()
         } else {
             controlsContent(bottomInset: contentBottomPadding, measurement: false)
         }
@@ -1225,6 +1255,46 @@ private extension View {
         } else {
             self
         }
+    }
+
+    @ViewBuilder
+    func dialKeyboardDismissBehavior() -> some View {
+        #if canImport(UIKit)
+        self.scrollDismissesKeyboard(.interactively)
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func dialWordsAutocapitalization() -> some View {
+        #if canImport(UIKit)
+        self.textInputAutocapitalization(.words)
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func dialCharactersAutocapitalization() -> some View {
+        #if canImport(UIKit)
+        self.textInputAutocapitalization(.characters)
+        #else
+        self
+        #endif
+    }
+}
+
+private func dialFallbackFABAlignment(for position: DialPosition) -> Alignment {
+    switch position {
+    case .topRight:
+        return .topTrailing
+    case .topLeft:
+        return .topLeading
+    case .bottomRight:
+        return .bottomTrailing
+    case .bottomLeft:
+        return .bottomLeading
     }
 }
 
@@ -1700,7 +1770,7 @@ private struct DialTextRow: View {
                 .foregroundStyle(DialTheme.textLabel)
 
             TextField(placeholder, text: $text)
-                .textInputAutocapitalization(.words)
+                .dialWordsAutocapitalization()
                 .multilineTextAlignment(.trailing)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(DialTheme.textLabel)
@@ -1754,7 +1824,7 @@ private struct DialColorRow: View {
             Spacer(minLength: 8)
 
             TextField("#FFFFFF", text: $draft)
-                .textInputAutocapitalization(.characters)
+                .dialCharactersAutocapitalization()
                 .disableAutocorrection(true)
                 .multilineTextAlignment(.trailing)
                 .font(.system(size: 13, weight: .medium, design: .monospaced))
@@ -2549,6 +2619,21 @@ package func dialHexString(from color: Color, prefersAlphaOutput: Bool = false) 
     let greenValue = Int(round(green * 255))
     let blueValue = Int(round(blue * 255))
     let alphaValue = Int(round(alpha * 255))
+
+    if prefersAlphaOutput || alphaValue < 255 {
+        return String(format: "#%02X%02X%02X%02X", redValue, greenValue, blueValue, alphaValue)
+    }
+
+    return String(format: "#%02X%02X%02X", redValue, greenValue, blueValue)
+    #elseif canImport(AppKit)
+    guard let nsColor = NSColor(color).usingColorSpace(.sRGB) else {
+        return nil
+    }
+
+    let redValue = Int(round(nsColor.redComponent * 255))
+    let greenValue = Int(round(nsColor.greenComponent * 255))
+    let blueValue = Int(round(nsColor.blueComponent * 255))
+    let alphaValue = Int(round(nsColor.alphaComponent * 255))
 
     if prefersAlphaOutput || alphaValue < 255 {
         return String(format: "#%02X%02X%02X%02X", redValue, greenValue, blueValue, alphaValue)

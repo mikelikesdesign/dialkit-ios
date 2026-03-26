@@ -13,6 +13,7 @@ This Swift package is based on the original [DialKit repository](https://github.
 ## Requirements
 
 - iOS 17 and later
+- macOS 14 and later for local package builds and `swift test`
 - SwiftUI
 - A model type that conforms to `Codable` and `Equatable`
 
@@ -142,7 +143,7 @@ Drawer behavior:
 - short control lists size the drawer to content; longer lists scroll once the drawer reaches its height cap
 - `storageID` namespaces the persisted FAB position so different screens do not collide
 
-`drawer` mode is currently iPhone-first. A dedicated iPad presentation is deferred for now.
+The package declares macOS support so it can be built and tested from a Mac host, but `drawer` mode is currently iPhone-first. A dedicated iPad presentation is deferred for now.
 
 ### `DialPanelState<Model>`
 
