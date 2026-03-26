@@ -371,6 +371,27 @@ package func dialResolvedTextEntryScrollTarget(
     return .drawerEditing
 }
 
+package func dialResolvedDrawerPresentationForTextEntry(
+    presentation: DialDrawerPresentation,
+    textEntryBehavior: DialTextEntryBehavior = .standard,
+    focusedTextEntryID: String? = nil,
+    keyboardOverlap: CGFloat = 0
+) -> DialDrawerPresentation {
+    guard presentation != .hidden else {
+        return presentation
+    }
+
+    guard dialDrawerHasActiveKeyboardTextEntry(
+        behavior: textEntryBehavior,
+        focusedTextEntryID: focusedTextEntryID,
+        keyboardOverlap: keyboardOverlap
+    ) else {
+        return presentation
+    }
+
+    return .tall
+}
+
 package func dialShouldPromoteDrawerForFocusedTextEntry(
     presentation: DialDrawerPresentation,
     focusedTextEntryID: String?
@@ -781,6 +802,12 @@ private struct DialDrawerPanel: View {
     var body: some View {
         let width = dialResolvedDrawerWidth(containerWidth: containerSize.width)
         let keyboardOverlap = keyboardObserver.overlap
+        let effectivePresentation = dialResolvedDrawerPresentationForTextEntry(
+            presentation: presentation,
+            textEntryBehavior: .drawer,
+            focusedTextEntryID: focusedTextEntryID,
+            keyboardOverlap: keyboardOverlap
+        )
         let maximumHeights = dialResolvedDrawerMaximumHeights(
             containerHeight: containerSize.height,
             keyboardOverlap: keyboardOverlap,
@@ -788,14 +815,14 @@ private struct DialDrawerPanel: View {
             focusedTextEntryID: focusedTextEntryID
         )
         let controlsHeightCap = dialDrawerControlsHeightCap(
-            presentation: presentation,
+            presentation: effectivePresentation,
             panelCount: panels.count,
             mediumMaxHeight: maximumHeights.medium,
             tallMaxHeight: maximumHeights.tall
         )
         let intrinsicHeight = dialDrawerChromeHeight(panelCount: panels.count) + measuredControlsContentHeight
         let resolvedHeight = dialResolvedDrawerHeight(
-            presentation: presentation,
+            presentation: effectivePresentation,
             intrinsicContentHeight: intrinsicHeight,
             mediumMaxHeight: maximumHeights.medium,
             tallMaxHeight: maximumHeights.tall,
