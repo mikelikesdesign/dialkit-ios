@@ -184,6 +184,14 @@ package func dialDrawerHasActiveKeyboardTextEntry(
         && dialResolvedKeyboardAvoidanceInset(keyboardOverlap: keyboardOverlap) > 0.5
 }
 
+package func dialDrawerUsesExpandedKeyboardLayout(
+    behavior: DialTextEntryBehavior,
+    keyboardOverlap: CGFloat
+) -> Bool {
+    behavior == .drawer
+        && dialResolvedKeyboardAvoidanceInset(keyboardOverlap: keyboardOverlap) > 0.5
+}
+
 package func dialResolvedDrawerTallMaximumHeight(
     availableHeight: CGFloat,
     keyboardOverlap: CGFloat,
@@ -193,9 +201,8 @@ package func dialResolvedDrawerTallMaximumHeight(
     let availableHeight = max(availableHeight, 0)
     let defaultHeight = min(availableHeight * 0.90, max(availableHeight - dialDrawerTopMargin, 0))
 
-    guard dialDrawerHasActiveKeyboardTextEntry(
+    guard dialDrawerUsesExpandedKeyboardLayout(
         behavior: textEntryBehavior,
-        focusedTextEntryID: focusedTextEntryID,
         keyboardOverlap: keyboardOverlap
     ) else {
         return defaultHeight
@@ -261,9 +268,8 @@ package func dialResolvedDrawerHeight(
     }
 
     if presentation == .tall,
-       dialDrawerHasActiveKeyboardTextEntry(
+       dialDrawerUsesExpandedKeyboardLayout(
         behavior: textEntryBehavior,
-        focusedTextEntryID: focusedTextEntryID,
         keyboardOverlap: keyboardOverlap
        ) {
         return dialDrawerHeightCap(
@@ -325,9 +331,8 @@ package func dialResolvedDrawerControlsViewportHeight(
         return intrinsicContentHeight
     }
 
-    if dialDrawerHasActiveKeyboardTextEntry(
+    if dialDrawerUsesExpandedKeyboardLayout(
         behavior: textEntryBehavior,
-        focusedTextEntryID: focusedTextEntryID,
         keyboardOverlap: keyboardOverlap
     ) {
         return max(maxHeight, 0)
@@ -344,9 +349,8 @@ package func dialResolvedControlsBottomInset(
 ) -> CGFloat {
     let baseInset = max(baseInset, 0)
 
-    guard dialDrawerHasActiveKeyboardTextEntry(
+    guard dialDrawerUsesExpandedKeyboardLayout(
         behavior: textEntryBehavior,
-        focusedTextEntryID: focusedTextEntryID,
         keyboardOverlap: keyboardOverlap
     ) else {
         return max(baseInset + dialResolvedKeyboardAvoidanceInset(keyboardOverlap: keyboardOverlap), 0)
@@ -381,9 +385,8 @@ package func dialResolvedDrawerPresentationForTextEntry(
         return presentation
     }
 
-    guard dialDrawerHasActiveKeyboardTextEntry(
+    guard dialDrawerUsesExpandedKeyboardLayout(
         behavior: textEntryBehavior,
-        focusedTextEntryID: focusedTextEntryID,
         keyboardOverlap: keyboardOverlap
     ) else {
         return presentation

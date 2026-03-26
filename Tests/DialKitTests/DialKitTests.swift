@@ -160,7 +160,7 @@ final class DialKitTests: XCTestCase {
                 focusedTextEntryID: nil,
                 keyboardOverlap: 216
             ),
-            .medium
+            .tall
         )
         XCTAssertEqual(
             dialResolvedDrawerPresentationForTextEntry(
@@ -170,6 +170,27 @@ final class DialKitTests: XCTestCase {
                 keyboardOverlap: 216
             ),
             .hidden
+        )
+    }
+
+    func testDrawerUsesExpandedKeyboardLayoutOnlyForDrawerModeWithVisibleKeyboard() {
+        XCTAssertTrue(
+            dialDrawerUsesExpandedKeyboardLayout(
+                behavior: .drawer,
+                keyboardOverlap: 216
+            )
+        )
+        XCTAssertFalse(
+            dialDrawerUsesExpandedKeyboardLayout(
+                behavior: .standard,
+                keyboardOverlap: 216
+            )
+        )
+        XCTAssertFalse(
+            dialDrawerUsesExpandedKeyboardLayout(
+                behavior: .drawer,
+                keyboardOverlap: 0
+            )
         )
     }
 
