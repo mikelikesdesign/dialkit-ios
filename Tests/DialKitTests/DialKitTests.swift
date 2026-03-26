@@ -143,6 +143,72 @@ final class DialKitTests: XCTestCase {
         )
     }
 
+    func testTextEntryAutoPromotionStoresMediumPresentationForLaterRestore() {
+        XCTAssertEqual(
+            dialResolvedDrawerRestorePresentationBeforeTextEntry(
+                currentPresentation: .medium,
+                storedPresentation: nil,
+                targetPresentation: .tall,
+                source: .textEntryAuto
+            ),
+            .medium
+        )
+    }
+
+    func testTextEntryRestoreReturnsStoredPresentationWhenEditingEnds() {
+        let storedPresentation = dialResolvedDrawerRestorePresentationBeforeTextEntry(
+            currentPresentation: .medium,
+            storedPresentation: nil,
+            targetPresentation: .tall,
+            source: .textEntryAuto
+        )
+
+        XCTAssertEqual(
+            dialResolvedDrawerRestorePresentationAfterTextEntryEnds(
+                storedPresentation: storedPresentation
+            ),
+            .medium
+        )
+    }
+
+    func testTextEntryAutoPromotionDoesNotStoreRestoreStateWhenDrawerStartsTall() {
+        let storedPresentation = dialResolvedDrawerRestorePresentationBeforeTextEntry(
+            currentPresentation: .tall,
+            storedPresentation: nil,
+            targetPresentation: .tall,
+            source: .textEntryAuto
+        )
+
+        XCTAssertNil(storedPresentation)
+        XCTAssertNil(
+            dialResolvedDrawerRestorePresentationAfterTextEntryEnds(
+                storedPresentation: storedPresentation
+            )
+        )
+    }
+
+    func testUserDrivenPresentationChangeClearsPendingTextEntryRestore() {
+        let storedPresentation = dialResolvedDrawerRestorePresentationBeforeTextEntry(
+            currentPresentation: .medium,
+            storedPresentation: nil,
+            targetPresentation: .tall,
+            source: .textEntryAuto
+        )
+        let clearedPresentation = dialResolvedDrawerRestorePresentationBeforeTextEntry(
+            currentPresentation: .tall,
+            storedPresentation: storedPresentation,
+            targetPresentation: .medium,
+            source: .user
+        )
+
+        XCTAssertNil(clearedPresentation)
+        XCTAssertNil(
+            dialResolvedDrawerRestorePresentationAfterTextEntryEnds(
+                storedPresentation: clearedPresentation
+            )
+        )
+    }
+
     func testResolvedDrawerPresentationForTextEntryForcesTallOnlyForActiveDrawerEditing() {
         XCTAssertEqual(
             dialResolvedDrawerPresentationForTextEntry(

@@ -166,6 +166,11 @@ package enum DialTextEntryScrollTarget: Equatable {
     case drawerEditing
 }
 
+package enum DialDrawerPresentationChangeSource: Equatable {
+    case user
+    case textEntryAuto
+}
+
 private let dialDrawerTopMargin: CGFloat = 12
 private let dialDrawerEditingRevealInset: CGFloat = 160
 
@@ -402,6 +407,30 @@ package func dialShouldPromoteDrawerForFocusedTextEntry(
     presentation == .medium && focusedTextEntryID != nil
 }
 
+package func dialResolvedDrawerRestorePresentationBeforeTextEntry(
+    currentPresentation: DialDrawerPresentation,
+    storedPresentation: DialDrawerPresentation?,
+    targetPresentation: DialDrawerPresentation,
+    source: DialDrawerPresentationChangeSource
+) -> DialDrawerPresentation? {
+    switch source {
+    case .user:
+        return nil
+    case .textEntryAuto:
+        guard currentPresentation == .medium, targetPresentation == .tall else {
+            return storedPresentation
+        }
+
+        return storedPresentation ?? currentPresentation
+    }
+}
+
+package func dialResolvedDrawerRestorePresentationAfterTextEntryEnds(
+    storedPresentation: DialDrawerPresentation?
+) -> DialDrawerPresentation? {
+    storedPresentation
+}
+
 package func dialTextEntryFocusID(for path: String) -> String {
     path
 }
@@ -609,6 +638,7 @@ struct DialDrawerHost: View {
     @State private var showsDrawerOverlay: Bool
     @State private var selectedPanelID: UUID?
     @State private var fabPosition: CGPoint?
+    @State private var drawerPresentationBeforeTextEntry: DialDrawerPresentation?
 
     init(store: DialStore, position: DialPosition, defaultOpen: Bool, storageID: String) {
         self._store = ObservedObject(wrappedValue: store)
@@ -620,6 +650,7 @@ struct DialDrawerHost: View {
         self._showsDrawerOverlay = State(initialValue: defaultOpen)
         self._selectedPanelID = State(initialValue: nil)
         self._fabPosition = State(initialValue: DialFABStorage.load(storageID: storageID))
+        self._drawerPresentationBeforeTextEntry = State(initialValue: nil)
     }
 
     private var activePanel: AnyDialPanelBox? {
@@ -649,14 +680,26 @@ struct DialDrawerHost: View {
                             containerSize: proxy.size,
                             onDrag: handleDrawerDrag,
                             onFocusedTextEntryChanged: { focusedTextEntryID in
-                                guard dialShouldPromoteDrawerForFocusedTextEntry(
+                                if dialShouldPromoteDrawerForFocusedTextEntry(
                                     presentation: drawerPresentation,
                                     focusedTextEntryID: focusedTextEntryID
-                                ) else {
+                                ) {
+                                    presentDrawer(.tall, source: .textEntryAuto)
                                     return
                                 }
 
-                                presentDrawer(.tall)
+                                guard focusedTextEntryID == nil else {
+                                    return
+                                }
+
+                                restoreDrawerPresentationAfterTextEntryIfNeeded()
+                            },
+                            onDrawerTextEntryActivityChanged: { isActive in
+                                guard !isActive else {
+                                    return
+                                }
+
+                                restoreDrawerPresentationAfterTextEntryIfNeeded()
                             }
                         )
                         .padding(.horizontal, dialDrawerHorizontalInset)
@@ -704,11 +747,21 @@ struct DialDrawerHost: View {
         if target == .hidden {
             hideDrawer()
         } else {
-            presentDrawer(target)
+            presentDrawer(target, source: .user)
         }
     }
 
-    private func presentDrawer(_ target: DialDrawerPresentation) {
+    private func presentDrawer(
+        _ target: DialDrawerPresentation,
+        source: DialDrawerPresentationChangeSource = .user
+    ) {
+        drawerPresentationBeforeTextEntry = dialResolvedDrawerRestorePresentationBeforeTextEntry(
+            currentPresentation: drawerPresentation,
+            storedPresentation: drawerPresentationBeforeTextEntry,
+            targetPresentation: target,
+            source: source
+        )
+
         if !showsDrawerOverlay {
             drawerVisualPresentation = target
             drawerPresentation = .hidden
@@ -732,6 +785,7 @@ struct DialDrawerHost: View {
     }
 
     private func hideDrawer() {
+        drawerPresentationBeforeTextEntry = nil
         drawerVisualPresentation = activeDrawerPresentation
 
         withAnimation(drawerAnimation) {
@@ -788,6 +842,21 @@ struct DialDrawerHost: View {
         .padding(8)
         #endif
     }
+
+    private func restoreDrawerPresentationAfterTextEntryIfNeeded() {
+        guard let restoredPresentation = dialResolvedDrawerRestorePresentationAfterTextEntryEnds(
+            storedPresentation: drawerPresentationBeforeTextEntry
+        ) else {
+            return
+        }
+
+        drawerPresentationBeforeTextEntry = nil
+
+        withAnimation(drawerAnimation) {
+            drawerVisualPresentation = restoredPresentation
+            drawerPresentation = restoredPresentation
+        }
+    }
 }
 
 private struct DialDrawerPanel: View {
@@ -798,6 +867,7 @@ private struct DialDrawerPanel: View {
     let containerSize: CGSize
     let onDrag: (CGFloat) -> Void
     let onFocusedTextEntryChanged: (String?) -> Void
+    let onDrawerTextEntryActivityChanged: (Bool) -> Void
 
     @State private var measuredControlsContentHeight: CGFloat = 0
     @State private var focusedTextEntryID: String?
@@ -806,6 +876,11 @@ private struct DialDrawerPanel: View {
     var body: some View {
         let width = dialResolvedDrawerWidth(containerWidth: containerSize.width)
         let keyboardOverlap = keyboardObserver.overlap
+        let hasActiveKeyboardTextEntry = dialDrawerHasActiveKeyboardTextEntry(
+            behavior: .drawer,
+            focusedTextEntryID: focusedTextEntryID,
+            keyboardOverlap: keyboardOverlap
+        )
         let effectivePresentation = dialResolvedDrawerPresentationForTextEntry(
             presentation: presentation,
             textEntryBehavior: .drawer,
@@ -888,6 +963,12 @@ private struct DialDrawerPanel: View {
                     onDrag(gesture.translation.height)
                 }
         )
+        .onAppear {
+            onDrawerTextEntryActivityChanged(hasActiveKeyboardTextEntry)
+        }
+        .onChange(of: hasActiveKeyboardTextEntry) { _, newValue in
+            onDrawerTextEntryActivityChanged(newValue)
+        }
     }
 
     private var panelPicker: some View {
