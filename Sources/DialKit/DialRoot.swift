@@ -19,6 +19,8 @@ public struct DialRoot: View {
     private let defaultOpen: Bool
     private let mode: DialMode
     private let storageID: String
+    private let showsFAB: Bool
+    private let isPresented: Binding<Bool>?
 
     public init(
         position: DialPosition = .bottomRight,
@@ -30,6 +32,23 @@ public struct DialRoot: View {
         self.defaultOpen = defaultOpen
         self.mode = mode
         self.storageID = storageID
+        self.showsFAB = mode == .drawer
+        self.isPresented = nil
+        self._store = ObservedObject(wrappedValue: DialStore.shared)
+    }
+
+    public init(
+        position: DialPosition = .bottomRight,
+        storageID: String = "default",
+        showsFAB: Bool = false,
+        isPresented: Binding<Bool>
+    ) {
+        self.position = position
+        self.defaultOpen = isPresented.wrappedValue
+        self.mode = .drawer
+        self.storageID = storageID
+        self.showsFAB = showsFAB
+        self.isPresented = isPresented
         self._store = ObservedObject(wrappedValue: DialStore.shared)
     }
 
@@ -44,7 +63,14 @@ public struct DialRoot: View {
                     }
                 }
             } else {
-                DialDrawerHost(store: store, position: position, defaultOpen: defaultOpen, storageID: storageID)
+                DialDrawerHost(
+                    store: store,
+                    position: position,
+                    defaultOpen: defaultOpen,
+                    storageID: storageID,
+                    showsFAB: showsFAB,
+                    isPresented: isPresented
+                )
             }
         }
     }

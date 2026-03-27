@@ -8,9 +8,28 @@ import UIKit
 @MainActor
 final class DialKitTests: XCTestCase {
     func testDialRootCompilesInBothModes() {
+        let isPresented = Binding.constant(false)
+
         _ = DialRoot()
         _ = DialRoot(mode: .inline, storageID: "inline-screen")
         _ = DialRoot(position: .topLeft, defaultOpen: true, mode: .drawer, storageID: "drawer-screen")
+        _ = DialRoot(position: .bottomRight, storageID: "bound-screen", showsFAB: false, isPresented: isPresented)
+    }
+
+    func testBoundDrawerRootBodyIsInertWithoutPanels() {
+        DialStore.shared.resetForTesting()
+        defer {
+            DialStore.shared.resetForTesting()
+        }
+
+        let root = DialRoot(
+            position: .bottomRight,
+            storageID: "no-panels",
+            showsFAB: false,
+            isPresented: .constant(true)
+        )
+
+        _ = root.body
     }
 
     func testReadmeStyleSampleCompiles() {
@@ -55,6 +74,56 @@ final class DialKitTests: XCTestCase {
         _ = view
     }
 
+    func testReadmeHostControlledSampleCompiles() {
+        struct CardModel: Codable, Equatable {
+            var title = "Card"
+            var cornerRadius = 24.0
+            var isEnabled = true
+        }
+
+        let dial = DialPanelState(
+            name: "Card",
+            initial: CardModel(),
+            controls: [
+                .text("title", keyPath: \.title),
+                .slider("cornerRadius", keyPath: \.cornerRadius, range: 0.0...48.0, step: 1.0),
+                .toggle("isEnabled", keyPath: \.isEnabled)
+            ]
+        )
+
+        struct HostControlledPreview: View {
+            let dial: DialPanelState<CardModel>
+            @State private var isDialPresented = false
+
+            var body: some View {
+                ZStack(alignment: .topTrailing) {
+                    RoundedRectangle(cornerRadius: dial.values.cornerRadius)
+                        .fill(dial.values.isEnabled ? Color.orange : Color.gray)
+                        .overlay {
+                            Text(dial.values.title)
+                                .foregroundStyle(.white)
+                        }
+                        .padding(40)
+
+                    Button("Tune Card") {
+                        isDialPresented = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .padding()
+
+                    DialRoot(
+                        position: .bottomRight,
+                        storageID: "card-preview",
+                        showsFAB: false,
+                        isPresented: $isDialPresented
+                    )
+                }
+            }
+        }
+
+        _ = HostControlledPreview(dial: dial)
+    }
+
     func testHexColorRoundTripsPreservingAlpha() throws {
         let translucent = try XCTUnwrap(dialColor(from: "#33669980"))
         XCTAssertEqual(dialHexString(from: translucent), "#33669980")
@@ -71,6 +140,185 @@ final class DialKitTests: XCTestCase {
         XCTAssertEqual(dialNextDrawerPresentation(from: .tall, translationHeight: 80), .medium)
         XCTAssertEqual(dialNextDrawerPresentation(from: .medium, translationHeight: 80), .hidden)
         XCTAssertEqual(dialNextDrawerPresentation(from: .medium, translationHeight: 10), .medium)
+    }
+
+    func testInitialDrawerStatePrefersExternalPresentationBinding() {
+        XCTAssertEqual(
+            dialInitialDrawerPresentation(defaultOpen: false, externalIsPresented: true),
+            .medium
+        )
+        XCTAssertEqual(
+            dialInitialDrawerPresentation(defaultOpen: true, externalIsPresented: false),
+            .hidden
+        )
+        XCTAssertTrue(
+            dialInitialDrawerOverlayVisibility(defaultOpen: false, externalIsPresented: true)
+        )
+        XCTAssertFalse(
+            dialInitialDrawerOverlayVisibility(defaultOpen: true, externalIsPresented: false)
+        )
+    }
+
+    func testResolvedExternalDrawerPresentationMapsBindingToMediumAndHidden() {
+        XCTAssertEqual(dialResolvedExternalDrawerPresentation(isPresented: true), .medium)
+        XCTAssertEqual(dialResolvedExternalDrawerPresentation(isPresented: false), .hidden)
+        XCTAssertNil(dialResolvedExternalDrawerPresentation(isPresented: nil))
+    }
+
+    func testResolvedExternalDrawerBindingValueTreatsVisibleDrawerAsPresented() {
+        XCTAssertEqual(
+            dialResolvedExternalDrawerBindingValue(
+                presentation: .hidden,
+                isDrivenByHost: true
+            ),
+            false
+        )
+        XCTAssertEqual(
+            dialResolvedExternalDrawerBindingValue(
+                presentation: .medium,
+                isDrivenByHost: true
+            ),
+            true
+        )
+        XCTAssertEqual(
+            dialResolvedExternalDrawerBindingValue(
+                presentation: .tall,
+                isDrivenByHost: true
+            ),
+            true
+        )
+        XCTAssertNil(
+            dialResolvedExternalDrawerBindingValue(
+                presentation: .medium,
+                isDrivenByHost: false
+            )
+        )
+    }
+
+    func testStagedDrawerOpenRequiresCurrentRequestAndOpenBinding() {
+        let requestID = dialNextStagedDrawerOpenRequestID(after: 0)
+
+        XCTAssertTrue(
+            dialShouldExecuteStagedDrawerOpen(
+                requestID: requestID,
+                currentRequestID: requestID,
+                pendingPresentation: .medium,
+                externalIsPresented: true,
+                isDrivenByHost: true
+            )
+        )
+        XCTAssertFalse(
+            dialShouldExecuteStagedDrawerOpen(
+                requestID: requestID,
+                currentRequestID: requestID,
+                pendingPresentation: .medium,
+                externalIsPresented: false,
+                isDrivenByHost: true
+            )
+        )
+        XCTAssertFalse(
+            dialShouldExecuteStagedDrawerOpen(
+                requestID: requestID,
+                currentRequestID: dialNextStagedDrawerOpenRequestID(after: requestID),
+                pendingPresentation: .medium,
+                externalIsPresented: true,
+                isDrivenByHost: true
+            )
+        )
+        XCTAssertFalse(
+            dialShouldExecuteStagedDrawerOpen(
+                requestID: requestID,
+                currentRequestID: requestID,
+                pendingPresentation: nil,
+                externalIsPresented: true,
+                isDrivenByHost: true
+            )
+        )
+    }
+
+    func testStagedDrawerOpenSupportsLegacyNonBindingDrawerFlow() {
+        let requestID = dialNextStagedDrawerOpenRequestID(after: 41)
+
+        XCTAssertTrue(
+            dialShouldExecuteStagedDrawerOpen(
+                requestID: requestID,
+                currentRequestID: requestID,
+                pendingPresentation: .medium,
+                externalIsPresented: nil,
+                isDrivenByHost: false
+            )
+        )
+    }
+
+    func testPendingDrawerOpenCountsAsCloseableWhileHidden() {
+        XCTAssertTrue(
+            dialHasVisibleOrPendingDrawerPresentation(
+                presentation: .hidden,
+                pendingPresentation: .medium
+            )
+        )
+        XCTAssertTrue(
+            dialHasVisibleOrPendingDrawerPresentation(
+                presentation: .medium,
+                pendingPresentation: nil
+            )
+        )
+        XCTAssertFalse(
+            dialHasVisibleOrPendingDrawerPresentation(
+                presentation: .hidden,
+                pendingPresentation: nil
+            )
+        )
+    }
+
+    func testDrawerAlreadyOpenCheckUsesVisibleOrPendingDrawerStateInsteadOfOverlayState() {
+        XCTAssertTrue(
+            dialShouldTreatDrawerAsAlreadyOpen(
+                presentation: .medium,
+                pendingPresentation: nil,
+                targetPresentation: .medium
+            )
+        )
+        XCTAssertTrue(
+            dialShouldTreatDrawerAsAlreadyOpen(
+                presentation: .hidden,
+                pendingPresentation: .medium,
+                targetPresentation: .medium
+            )
+        )
+        XCTAssertFalse(
+            dialShouldTreatDrawerAsAlreadyOpen(
+                presentation: .hidden,
+                pendingPresentation: nil,
+                targetPresentation: .medium
+            )
+        )
+    }
+
+    func testHiddenPendingDrawerOpenHidesOverlayImmediately() {
+        XCTAssertTrue(
+            dialShouldHideDrawerOverlayImmediately(
+                presentation: .hidden,
+                pendingPresentation: .medium
+            )
+        )
+        XCTAssertFalse(
+            dialShouldHideDrawerOverlayImmediately(
+                presentation: .medium,
+                pendingPresentation: nil
+            )
+        )
+        XCTAssertFalse(
+            dialShouldHideDrawerOverlayImmediately(
+                presentation: .hidden,
+                pendingPresentation: nil
+            )
+        )
+    }
+
+    func testFABPositionPersistenceCanBeDisabledWhenFABIsHidden() {
+        XCTAssertTrue(dialShouldPersistFABPosition(showsFAB: true))
+        XCTAssertFalse(dialShouldPersistFABPosition(showsFAB: false))
     }
 
     func testDrawerHelpersMatchPickerAndSpacingRules() {

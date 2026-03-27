@@ -115,6 +115,90 @@ package func dialNextDrawerPresentation(from current: DialDrawerPresentation, tr
     }
 }
 
+package func dialInitialDrawerPresentation(
+    defaultOpen: Bool,
+    externalIsPresented: Bool? = nil
+) -> DialDrawerPresentation {
+    dialResolvedExternalDrawerPresentation(isPresented: externalIsPresented)
+        ?? (defaultOpen ? .medium : .hidden)
+}
+
+package func dialInitialDrawerOverlayVisibility(
+    defaultOpen: Bool,
+    externalIsPresented: Bool? = nil
+) -> Bool {
+    externalIsPresented ?? defaultOpen
+}
+
+package func dialResolvedExternalDrawerPresentation(isPresented: Bool?) -> DialDrawerPresentation? {
+    guard let isPresented else {
+        return nil
+    }
+
+    return isPresented ? .medium : .hidden
+}
+
+package func dialResolvedExternalDrawerBindingValue(
+    presentation: DialDrawerPresentation,
+    isDrivenByHost: Bool
+) -> Bool? {
+    guard isDrivenByHost else {
+        return nil
+    }
+
+    return presentation.isExpanded
+}
+
+package func dialNextStagedDrawerOpenRequestID(after current: UInt) -> UInt {
+    current &+ 1
+}
+
+package func dialShouldExecuteStagedDrawerOpen(
+    requestID: UInt,
+    currentRequestID: UInt,
+    pendingPresentation: DialDrawerPresentation?,
+    externalIsPresented: Bool? = nil,
+    isDrivenByHost: Bool
+) -> Bool {
+    guard requestID == currentRequestID,
+          let pendingPresentation,
+          pendingPresentation.isExpanded else {
+        return false
+    }
+
+    guard !isDrivenByHost else {
+        return dialResolvedExternalDrawerPresentation(isPresented: externalIsPresented)?.isExpanded == true
+    }
+
+    return true
+}
+
+package func dialHasVisibleOrPendingDrawerPresentation(
+    presentation: DialDrawerPresentation,
+    pendingPresentation: DialDrawerPresentation?
+) -> Bool {
+    presentation.isExpanded || pendingPresentation != nil
+}
+
+package func dialShouldTreatDrawerAsAlreadyOpen(
+    presentation: DialDrawerPresentation,
+    pendingPresentation: DialDrawerPresentation?,
+    targetPresentation: DialDrawerPresentation
+) -> Bool {
+    presentation == targetPresentation || pendingPresentation == targetPresentation
+}
+
+package func dialShouldHideDrawerOverlayImmediately(
+    presentation: DialDrawerPresentation,
+    pendingPresentation: DialDrawerPresentation?
+) -> Bool {
+    presentation == .hidden && pendingPresentation != nil
+}
+
+package func dialShouldPersistFABPosition(showsFAB: Bool) -> Bool {
+    showsFAB
+}
+
 package func dialResolvedPanelSelection(current: UUID?, available: [UUID]) -> UUID? {
     guard !available.isEmpty else {
         return nil
@@ -632,6 +716,8 @@ struct DialDrawerHost: View {
     let position: DialPosition
     let defaultOpen: Bool
     let storageID: String
+    let showsFAB: Bool
+    private let isPresented: Binding<Bool>?
 
     @State private var drawerPresentation: DialDrawerPresentation
     @State private var drawerVisualPresentation: DialDrawerPresentation
@@ -639,23 +725,50 @@ struct DialDrawerHost: View {
     @State private var selectedPanelID: UUID?
     @State private var fabPosition: CGPoint?
     @State private var drawerPresentationBeforeTextEntry: DialDrawerPresentation?
+    @State private var pendingDrawerPresentation: DialDrawerPresentation?
+    @State private var stagedDrawerOpenRequestID: UInt
 
-    init(store: DialStore, position: DialPosition, defaultOpen: Bool, storageID: String) {
+    init(
+        store: DialStore,
+        position: DialPosition,
+        defaultOpen: Bool,
+        storageID: String,
+        showsFAB: Bool,
+        isPresented: Binding<Bool>? = nil
+    ) {
+        let initialPresentation = dialInitialDrawerPresentation(
+            defaultOpen: defaultOpen,
+            externalIsPresented: isPresented?.wrappedValue
+        )
+
         self._store = ObservedObject(wrappedValue: store)
         self.position = position
         self.defaultOpen = defaultOpen
         self.storageID = storageID
-        self._drawerPresentation = State(initialValue: defaultOpen ? .medium : .hidden)
-        self._drawerVisualPresentation = State(initialValue: .medium)
-        self._showsDrawerOverlay = State(initialValue: defaultOpen)
+        self.showsFAB = showsFAB
+        self.isPresented = isPresented
+        self._drawerPresentation = State(initialValue: initialPresentation)
+        self._drawerVisualPresentation = State(initialValue: initialPresentation == .hidden ? .medium : initialPresentation)
+        self._showsDrawerOverlay = State(initialValue: dialInitialDrawerOverlayVisibility(
+            defaultOpen: defaultOpen,
+            externalIsPresented: isPresented?.wrappedValue
+        ))
         self._selectedPanelID = State(initialValue: nil)
-        self._fabPosition = State(initialValue: DialFABStorage.load(storageID: storageID))
+        self._fabPosition = State(initialValue: dialShouldPersistFABPosition(showsFAB: showsFAB)
+            ? DialFABStorage.load(storageID: storageID)
+            : nil)
         self._drawerPresentationBeforeTextEntry = State(initialValue: nil)
+        self._pendingDrawerPresentation = State(initialValue: nil)
+        self._stagedDrawerOpenRequestID = State(initialValue: 0)
     }
 
     private var activePanel: AnyDialPanelBox? {
         let resolvedID = dialResolvedPanelSelection(current: selectedPanelID, available: store.panels.map(\.id))
         return store.panels.first(where: { $0.id == resolvedID }) ?? store.panels.first
+    }
+
+    private var externalPresentationValue: Bool? {
+        isPresented?.wrappedValue
     }
 
     var body: some View {
@@ -708,7 +821,7 @@ struct DialDrawerHost: View {
                     }
                 }
 
-                if !showsDrawerOverlay {
+                if showsFAB && !showsDrawerOverlay {
                     ZStack(alignment: .topLeading) {
                         Color.clear
                             .allowsHitTesting(false)
@@ -730,7 +843,14 @@ struct DialDrawerHost: View {
             selectedPanelID = dialResolvedPanelSelection(current: selectedPanelID, available: ids)
         }
         .onChange(of: fabPosition) { _, newValue in
+            guard dialShouldPersistFABPosition(showsFAB: showsFAB) else {
+                return
+            }
+
             DialFABStorage.save(newValue, storageID: storageID)
+        }
+        .onChange(of: externalPresentationValue) { _, newValue in
+            handleExternalPresentationChange(newValue)
         }
     }
 
@@ -765,32 +885,68 @@ struct DialDrawerHost: View {
         if !showsDrawerOverlay {
             drawerVisualPresentation = target
             drawerPresentation = .hidden
+            let requestID = dialNextStagedDrawerOpenRequestID(after: stagedDrawerOpenRequestID)
+            stagedDrawerOpenRequestID = requestID
+            pendingDrawerPresentation = target
             withAnimation(fabAppearanceAnimation) {
                 showsDrawerOverlay = true
             }
 
             DispatchQueue.main.async {
+                guard dialShouldExecuteStagedDrawerOpen(
+                    requestID: requestID,
+                    currentRequestID: stagedDrawerOpenRequestID,
+                    pendingPresentation: pendingDrawerPresentation,
+                    externalIsPresented: externalPresentationValue,
+                    isDrivenByHost: isPresented != nil
+                ) else {
+                    return
+                }
+
+                pendingDrawerPresentation = nil
                 withAnimation(drawerAnimation) {
                     drawerVisualPresentation = target
                     drawerPresentation = target
                 }
             }
+
+            syncExternalPresentationBinding(with: target)
             return
         }
 
+        cancelStagedDrawerOpen()
         withAnimation(drawerAnimation) {
             drawerVisualPresentation = target
             drawerPresentation = target
         }
+
+        syncExternalPresentationBinding(with: target)
     }
 
     private func hideDrawer() {
+        let shouldHideOverlayImmediately = dialShouldHideDrawerOverlayImmediately(
+            presentation: drawerPresentation,
+            pendingPresentation: pendingDrawerPresentation
+        )
+
+        cancelStagedDrawerOpen()
         drawerPresentationBeforeTextEntry = nil
         drawerVisualPresentation = activeDrawerPresentation
+
+        if shouldHideOverlayImmediately {
+            syncExternalPresentationBinding(with: .hidden)
+
+            withAnimation(fabAppearanceAnimation) {
+                showsDrawerOverlay = false
+            }
+            return
+        }
 
         withAnimation(drawerAnimation) {
             drawerPresentation = .hidden
         }
+
+        syncExternalPresentationBinding(with: .hidden)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
             if drawerPresentation == .hidden {
@@ -807,6 +963,52 @@ struct DialDrawerHost: View {
 
     private var fabAppearanceAnimation: Animation {
         .spring(response: 0.22, dampingFraction: 0.9)
+    }
+
+    private func cancelStagedDrawerOpen() {
+        pendingDrawerPresentation = nil
+        stagedDrawerOpenRequestID = dialNextStagedDrawerOpenRequestID(after: stagedDrawerOpenRequestID)
+    }
+
+    private func handleExternalPresentationChange(_ newValue: Bool?) {
+        guard let target = dialResolvedExternalDrawerPresentation(isPresented: newValue) else {
+            return
+        }
+
+        if target.isExpanded {
+            guard !dialShouldTreatDrawerAsAlreadyOpen(
+                presentation: drawerPresentation,
+                pendingPresentation: pendingDrawerPresentation,
+                targetPresentation: target
+            ) else {
+                return
+            }
+
+            presentDrawer(target)
+            return
+        }
+
+        guard dialHasVisibleOrPendingDrawerPresentation(
+            presentation: drawerPresentation,
+            pendingPresentation: pendingDrawerPresentation
+        ) else {
+            return
+        }
+
+        hideDrawer()
+    }
+
+    private func syncExternalPresentationBinding(with presentation: DialDrawerPresentation) {
+        guard let resolvedValue = dialResolvedExternalDrawerBindingValue(
+            presentation: presentation,
+            isDrivenByHost: isPresented != nil
+        ),
+        let isPresented,
+        isPresented.wrappedValue != resolvedValue else {
+            return
+        }
+
+        isPresented.wrappedValue = resolvedValue
     }
 
     @ViewBuilder
