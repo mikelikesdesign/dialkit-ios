@@ -106,11 +106,14 @@ A few important details:
 - Keep `DialPanelState` alive for as long as you want the panel to exist. In SwiftUI that usually means `@StateObject`.
 - `dial.values` is the source of truth for the tuned values.
 - You only need one `DialRoot` to render every active panel.
-- In drawer mode, `DialRoot` shows a draggable FAB first and opens a mobile bottom drawer when tapped.
+- In drawer mode, `DialRoot` shows a draggable FAB by default and opens a mobile bottom drawer when tapped.
+- If you do not want the FAB on screen, use the binding-driven drawer initializer and open DialKit from your own control or gesture.
 
 ## Public API Overview
 
 ### `DialRoot`
+
+Default FAB-driven drawer setup:
 
 ```swift
 DialRoot(
@@ -118,6 +121,19 @@ DialRoot(
     defaultOpen: false,
     mode: .drawer,
     storageID: "default"
+)
+```
+
+Host-controlled drawer setup:
+
+```swift
+@State private var isDialPresented = false
+
+DialRoot(
+    position: .bottomRight,
+    storageID: "default",
+    showsFAB: false,
+    isPresented: $isDialPresented
 )
 ```
 
@@ -137,13 +153,73 @@ Supported modes:
 
 Drawer behavior:
 
-- `defaultOpen: false` starts closed with only the FAB visible
+- `defaultOpen: false` starts closed with only the FAB visible when you use the legacy drawer initializer
 - `defaultOpen: true` starts with the drawer open at the medium height
 - the mobile drawer can be dragged between medium and tall states, then dragged down to dismiss
 - short control lists size the drawer to content; longer lists scroll once the drawer reaches its height cap
-- `storageID` namespaces the persisted FAB position so different screens do not collide
+- `isPresented` makes the host app the source of truth for drawer visibility
+- when `isPresented` changes to `true`, DialKit opens the drawer at the medium height
+- when `isPresented` changes to `false`, DialKit dismisses the drawer
+- user-driven dismissals also write `false` back into the binding
+- `showsFAB` defaults to `false` on the binding-driven initializer; set it to `true` if you want both your own trigger and the built-in FAB
+- `storageID` namespaces the persisted FAB position only when the FAB is enabled
 
 The package declares macOS support so it can be built and tested from a Mac host, but `drawer` mode is currently iPhone-first. A dedicated iPad presentation is deferred for now.
+
+### Custom Triggers
+
+You can drive DialKit from any piece of host-owned UI by mutating a Boolean binding.
+
+```swift
+import DialKit
+import SwiftUI
+
+struct CardModel: Codable, Equatable {
+    var title = "Card"
+    var cornerRadius = 24.0
+    var isEnabled = true
+}
+
+struct CardPreview: View {
+    @StateObject private var dial = DialPanelState(
+        name: "Card",
+        initial: CardModel(),
+        controls: [
+            .text("title", keyPath: \.title),
+            .slider("cornerRadius", keyPath: \.cornerRadius, range: 0.0...48.0, step: 1.0),
+            .toggle("isEnabled", keyPath: \.isEnabled)
+        ]
+    )
+    @State private var isDialPresented = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            RoundedRectangle(cornerRadius: dial.values.cornerRadius)
+                .fill(dial.values.isEnabled ? .orange : .gray)
+                .overlay {
+                    Text(dial.values.title)
+                        .foregroundStyle(.white)
+                }
+                .padding(40)
+
+            Button("Tune Card") {
+                isDialPresented = true
+            }
+            .buttonStyle(.borderedProminent)
+            .padding()
+
+            DialRoot(
+                position: .bottomRight,
+                storageID: "card-preview",
+                showsFAB: false,
+                isPresented: $isDialPresented
+            )
+        }
+    }
+}
+```
+
+Any SwiftUI interaction can drive the same binding: a toolbar button, a long-press gesture, a custom overlay handle, or a gesture recognizer that flips `isDialPresented` to `true`.
 
 ### `DialPanelState<Model>`
 
@@ -386,7 +462,7 @@ When you reconfigure a panel:
 
 ## Tips
 
-- Add `DialRoot` close to the top of your screen hierarchy so the FAB and drawer can overlay your content.
+- Add `DialRoot` close to the top of your screen hierarchy so the drawer and optional FAB can overlay your content.
 - Use a unique `storageID` per screen if you want each screen to remember its own FAB position.
 - Use `inline` mode for settings screens, inspectors, or debug panels that should always stay visible.
 - The built-in slider UI supports both tap-to-edit values and direct drag interaction with step haptics on iPhone.
@@ -405,7 +481,7 @@ When you reconfigure a panel:
 
 - Config-driven controls keyed by writable key paths into your model
 - Shared global store for multiple panels
-- Draggable FAB with persisted position per `storageID`
+- Optional draggable FAB with persisted position per `storageID`
 - Mobile drawer presentation plus inline presentation
 - Content-sized iPhone drawer with medium/tall drag states and shared multi-panel picker
 - Presets with base-state restore and active-preset autosave
