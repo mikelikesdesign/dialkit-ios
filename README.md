@@ -168,7 +168,7 @@ The package declares macOS support so it can be built and tested from a Mac host
 
 ### Custom Triggers
 
-You can open DialKit from your own app UI by toggling a Boolean binding. In the demo, the drawer opens with a triple-tap gesture instead of the default FAB.
+You can open DialKit from your own app UI by toggling a Boolean binding. In the demo, the drawer opens with a triple tap gesture instead of the default FAB.
 
 ![Drawer interaction demo](media/drawer-interaction.gif)
 
