@@ -169,6 +169,9 @@ The package declares macOS support so it can be built and tested from a Mac host
 ### Custom Triggers
 
 You can drive DialKit from any piece of host-owned UI by mutating a Boolean binding.
+In the demo, the drawer opens from a triple-tap gesture instead of the default FAB.
+
+![Drawer interaction demo](media/drawer-interaction.gif)
 
 ```swift
 import DialKit
@@ -219,7 +222,7 @@ struct CardPreview: View {
 }
 ```
 
-Any SwiftUI interaction can drive the same binding: a toolbar button, a long-press gesture, a custom overlay handle, or a gesture recognizer that flips `isDialPresented` to `true`.
+Any SwiftUI interaction can drive the same binding. In the demo, a triple-tap gesture flips `isDialPresented` to `true`; you can also use a toolbar button, a custom overlay handle, a long-press gesture, or any other SwiftUI interaction that opens the drawer.
 
 ### `DialPanelState<Model>`
 
