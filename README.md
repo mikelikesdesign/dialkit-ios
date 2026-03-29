@@ -27,9 +27,18 @@ import DialKit
 
 ### Using DialKit from UIKit
 
-DialKit's UI is built with SwiftUI, but UIKit apps can still use it by embedding a small `UIHostingController` bridge. You do not need to rewrite your app in SwiftUI to use the package.
+DialKit's UI is built with SwiftUI, but UIKit apps can still use it by embedding `DialRoot` in a small `UIHostingController` bridge.
+
+A UIKit integration detail:
+
+If you pin a full-screen `UIHostingController` over an interaction-heavy UIKit screen, the overlay can intercept touches even when the drawer is visually closed. For UIKit, there are two recommended patterns depending on the kind of screen you are building.
+
+#### Option 1: Host-Controlled Drawer (Recommended for interaction-heavy screens)
+
+Use the binding-driven initializer, disable the built-in FAB, and open the drawer from your own UIKit button or gesture. This is the safest option for drawing, scrubbing, camera gestures, games, or any custom touch surface.
 
 ```swift
+import Combine
 import DialKit
 import SwiftUI
 import UIKit
@@ -40,7 +49,28 @@ struct CardModel: Codable, Equatable {
     var isEnabled = true
 }
 
+@MainActor
+final class DialPresentationBridge: ObservableObject {
+    @Published var isPresented = false
+}
+
+private struct DialDrawerOverlay: View {
+    @ObservedObject var presentation: DialPresentationBridge
+
+    var body: some View {
+        DialRoot(
+            position: .bottomRight,
+            storageID: "card-preview",
+            showsFAB: false,
+            isPresented: $presentation.isPresented
+        )
+    }
+}
+
 final class CardViewController: UIViewController {
+    private let presentationBridge = DialPresentationBridge()
+    private var cancellables: Set<AnyCancellable> = []
+
     private let dial = DialPanelState(
         name: "Card",
         initial: CardModel(),
@@ -51,33 +81,192 @@ final class CardViewController: UIViewController {
         ]
     )
 
-    #if DEBUG
     private lazy var dialHost = UIHostingController(
-        rootView: DialRoot(
-            position: .bottomRight,
-            defaultOpen: false,
-            mode: .drawer,
-            storageID: "card-preview"
-        )
+        rootView: DialDrawerOverlay(presentation: presentationBridge)
     )
-    #endif
 
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        #if DEBUG
         addChild(dialHost)
         dialHost.view.frame = view.bounds
         dialHost.view.backgroundColor = .clear
         dialHost.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(dialHost.view)
         dialHost.didMove(toParent: self)
-        #endif
+
+        dial.$values
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] values in
+                self?.apply(values)
+            }
+            .store(in: &cancellables)
+    }
+
+    @objc
+    private func openDial() {
+        presentationBridge.isPresented = true
+    }
+
+    private func apply(_ values: CardModel) {
+        // Update your UIKit view hierarchy from dial.values.
     }
 }
 ```
 
-Add the hosting controller high enough in your UIKit hierarchy for the drawer or FAB overlay to sit above your content.
+#### Option 2: Built-in FAB (Use a passthrough container)
+
+If you want DialKit's built-in FAB in a UIKit app, keep `DialRoot` mounted but place the hosting view inside a passthrough container.
+
+When the drawer is closed, the container should let non-interactive overlay space fall through to UIKit.
+When the drawer is open, the container should stop passing touches through so backdrop tap-to-dismiss and drag-to-dismiss still work.
+
+```swift
+import Combine
+import DialKit
+import SwiftUI
+import UIKit
+
+struct CardModel: Codable, Equatable {
+    var title = "Card"
+    var cornerRadius = 24.0
+    var isEnabled = true
+}
+
+@MainActor
+final class DialPresentationBridge: ObservableObject {
+    @Published var isPresented = false
+}
+
+private struct DialFABOverlay: View {
+    @ObservedObject var presentation: DialPresentationBridge
+
+    var body: some View {
+        DialRoot(
+            position: .bottomRight,
+            storageID: "card-preview",
+            showsFAB: true,
+            isPresented: $presentation.isPresented
+        )
+    }
+}
+
+final class PassthroughHostingContainerView: UIView {
+    weak var hostedView: UIView?
+    var allowsPassthrough = true
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard allowsPassthrough else {
+            return super.hitTest(point, with: event)
+        }
+
+        guard
+            let hostedView,
+            !isHidden,
+            alpha > 0.01,
+            isUserInteractionEnabled
+        else {
+            return nil
+        }
+
+        let hostedPoint = convert(point, to: hostedView)
+        return interactiveHit(in: hostedView, at: hostedPoint, with: event)
+    }
+
+    private func interactiveHit(in view: UIView, at point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard
+            !view.isHidden,
+            view.alpha > 0.01,
+            view.isUserInteractionEnabled,
+            view.point(inside: point, with: event)
+        else {
+            return nil
+        }
+
+        for subview in view.subviews.reversed() {
+            let subviewPoint = view.convert(point, to: subview)
+            if let hitView = interactiveHit(in: subview, at: subviewPoint, with: event) {
+                return hitView
+            }
+        }
+
+        guard view !== hostedView else {
+            return nil
+        }
+
+        if view is UIControl || view is UIScrollView {
+            return view
+        }
+
+        return !(view.gestureRecognizers?.isEmpty ?? true) ? view : nil
+    }
+}
+
+final class CardViewController: UIViewController {
+    private let presentationBridge = DialPresentationBridge()
+    private let dialContainerView = PassthroughHostingContainerView()
+    private var cancellables: Set<AnyCancellable> = []
+
+    private let dial = DialPanelState(
+        name: "Card",
+        initial: CardModel(),
+        controls: [
+            .text("title", keyPath: \.title),
+            .slider("cornerRadius", keyPath: \.cornerRadius, range: 0.0...48.0, step: 1.0),
+            .toggle("isEnabled", keyPath: \.isEnabled)
+        ]
+    )
+
+    private lazy var dialHost = UIHostingController(
+        rootView: DialFABOverlay(presentation: presentationBridge)
+    )
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        presentationBridge.$isPresented
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isPresented in
+                self?.dialContainerView.allowsPassthrough = !isPresented
+            }
+            .store(in: &cancellables)
+
+        dialContainerView.translatesAutoresizingMaskIntoConstraints = false
+        dialContainerView.backgroundColor = .clear
+        view.addSubview(dialContainerView)
+
+        NSLayoutConstraint.activate([
+            dialContainerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            dialContainerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            dialContainerView.topAnchor.constraint(equalTo: view.topAnchor),
+            dialContainerView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+
+        addChild(dialHost)
+        dialHost.view.translatesAutoresizingMaskIntoConstraints = false
+        dialHost.view.backgroundColor = .clear
+        dialContainerView.hostedView = dialHost.view
+        dialContainerView.addSubview(dialHost.view)
+
+        NSLayoutConstraint.activate([
+            dialHost.view.leadingAnchor.constraint(equalTo: dialContainerView.leadingAnchor),
+            dialHost.view.trailingAnchor.constraint(equalTo: dialContainerView.trailingAnchor),
+            dialHost.view.topAnchor.constraint(equalTo: dialContainerView.topAnchor),
+            dialHost.view.bottomAnchor.constraint(equalTo: dialContainerView.bottomAnchor)
+        ])
+
+        dialHost.didMove(toParent: self)
+    }
+}
+```
+
+#### Important Notes
+
+- Add the hosting controller high enough in your UIKit hierarchy for the drawer or FAB overlay to sit above your content.
+- `dial.values` remains the source of truth for your tuned values.
+- Keep `DialPanelState` alive for as long as you want the panel to exist.
+- If UIKit needs to drive `isPresented`, prefer an `ObservableObject` bridge over a plain stored `Bool`, so SwiftUI sees external state changes reliably.
+- If you mount and unmount the SwiftUI host from UIKit and observe stale drawer state across repeated open/close cycles, recreating the `UIHostingController` per presentation is safer than reusing one that has already driven the drawer lifecycle.
 
 ## Core Concepts
 
