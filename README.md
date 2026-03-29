@@ -25,6 +25,60 @@ Add this repository as a Swift Package dependency in Xcode, then import `DialKit
 import DialKit
 ```
 
+### Using DialKit from UIKit
+
+DialKit's UI is built with SwiftUI, but UIKit apps can still use it by embedding a small `UIHostingController` bridge. You do not need to rewrite your app in SwiftUI to use the package.
+
+```swift
+import DialKit
+import SwiftUI
+import UIKit
+
+struct CardModel: Codable, Equatable {
+    var title = "Card"
+    var cornerRadius = 24.0
+    var isEnabled = true
+}
+
+final class CardViewController: UIViewController {
+    private let dial = DialPanelState(
+        name: "Card",
+        initial: CardModel(),
+        controls: [
+            .text("title", keyPath: \.title),
+            .slider("cornerRadius", keyPath: \.cornerRadius, range: 0.0...48.0, step: 1.0),
+            .toggle("isEnabled", keyPath: \.isEnabled)
+        ]
+    )
+
+    #if DEBUG
+    private lazy var dialHost = UIHostingController(
+        rootView: DialRoot(
+            position: .bottomRight,
+            defaultOpen: false,
+            mode: .drawer,
+            storageID: "card-preview"
+        )
+    )
+    #endif
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        #if DEBUG
+        addChild(dialHost)
+        dialHost.view.frame = view.bounds
+        dialHost.view.backgroundColor = .clear
+        dialHost.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(dialHost.view)
+        dialHost.didMove(toParent: self)
+        #endif
+    }
+}
+```
+
+Add the hosting controller high enough in your UIKit hierarchy for the drawer or FAB overlay to sit above your content.
+
 ## Core Concepts
 
 DialKit has three main pieces:
