@@ -2,8 +2,6 @@
 
 DialKit is a SwiftUI package for editing and previewing interface updates live.
 
-> Work in progress: this package is being actively developed, please reach out with feedback, thank you.
-
 ![DialKit demo](media/dialkit.gif)
 
 ## Credit
@@ -713,14 +711,6 @@ When you reconfigure a panel:
 - The built-in slider UI supports both tap-to-edit values and direct drag interaction with step haptics on iPhone.
 - Keep your model small and focused. DialKit works best when each panel represents a coherent group of values.
 - Prefer stable path names because they become labels, nested control identifiers, and action paths.
-
-## Current Limitations
-
-- The package is still a work in progress.
-- Presets are in-memory only. Persistence is up to the host app.
-- Drawer mode is currently iPhone-first. A dedicated iPad presentation has not been added yet.
-- The API is intentionally package-first right now; an example app is not bundled yet.
-- Color values are stored as hex strings rather than `Color` values.
 
 ## Features
 
