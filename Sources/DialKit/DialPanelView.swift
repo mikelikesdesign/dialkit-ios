@@ -3028,6 +3028,9 @@ private func slider(
 private func copyTextToPasteboard(_ text: String) {
     #if canImport(UIKit)
     UIPasteboard.general.string = text
+    #elseif canImport(AppKit)
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(text, forType: .string)
     #endif
 }
 
