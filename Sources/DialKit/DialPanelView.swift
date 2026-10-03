@@ -1390,13 +1390,15 @@ private struct DialPanelControlsView: View {
             Button {
                 panel.savePreset(named: panel.nextPresetName)
             } label: {
-                Image(systemName: "slider.horizontal.below.square.and.square.filled")
-                    .font(.system(size: 14, weight: .semibold))
+                DialAddVersionIcon()
+                    .stroke(style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                    .frame(width: 18, height: 18)
                     .foregroundStyle(DialTheme.textLabel)
                     .frame(width: 36, height: 36)
                     .background(DialRowBackground(cornerRadius: 8))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Save \(panel.nextPresetName)")
 
             Menu {
                 Picker("Preset", selection: presetSelection) {
@@ -1676,6 +1678,24 @@ struct DialPanelContainer: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+}
+
+/// Matches ICON_ADD_PRESET in Josh Puckett's DialKit (src/icons.ts).
+private struct DialAddVersionIcon: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        for (start, end) in [
+            (CGPoint(x: 4, y: 6), CGPoint(x: 20, y: 6)),
+            (CGPoint(x: 4, y: 12), CGPoint(x: 10, y: 12)),
+            (CGPoint(x: 4, y: 18), CGPoint(x: 10, y: 18)),
+            (CGPoint(x: 15, y: 15), CGPoint(x: 21, y: 15)),
+            (CGPoint(x: 18, y: 12), CGPoint(x: 18, y: 18))
+        ] {
+            path.move(to: CGPoint(x: rect.minX + start.x / 24 * rect.width, y: rect.minY + start.y / 24 * rect.height))
+            path.addLine(to: CGPoint(x: rect.minX + end.x / 24 * rect.width, y: rect.minY + end.y / 24 * rect.height))
+        }
+        return path
     }
 }
 
