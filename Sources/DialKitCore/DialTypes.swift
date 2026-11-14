@@ -1,6 +1,20 @@
 import CoreGraphics
 import Foundation
 
+public enum DialVersionSaveError: Error, Equatable, LocalizedError {
+    case copyFailed
+    case copyChangedValues
+
+    public var errorDescription: String? {
+        switch self {
+        case .copyFailed:
+            return "The model could not be copied. Supply a copyValues function that creates an independent copy."
+        case .copyChangedValues:
+            return "Copying changed the model's values. Supply a copyValues function that preserves all version state, including properties excluded from Codable."
+        }
+    }
+}
+
 public protocol DialNumericValue: Comparable {
     var dialDoubleValue: Double { get }
     init(dialDoubleValue: Double)

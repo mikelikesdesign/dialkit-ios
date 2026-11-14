@@ -222,7 +222,7 @@ package struct DialSectionDividerVisibility: Equatable {
 
 private let dialDrawerHandleSectionHeight: CGFloat = 27
 private let dialDrawerPanelPickerSectionHeight: CGFloat = 40
-private let dialDrawerToolbarSectionHeight: CGFloat = 42
+private let dialDrawerToolbarSectionHeight: CGFloat = 44 + dialDrawerToolbarBottomPadding
 
 package func dialDrawerShowsPanelPicker(panelCount: Int) -> Bool {
     panelCount > 1
@@ -574,8 +574,8 @@ package func dialResolveSliderGestureDisposition(
     return .scroll
 }
 
-package func dialActivePresetName(activePresetID: UUID?, presets: [DialPresetSummary]) -> String {
-    presets.first(where: { $0.id == activePresetID })?.name ?? "Version 1"
+package func dialActivePresetName(activePresetID: UUID?, presets: [DialPresetSummary], baseName: String = "V1") -> String {
+    presets.first(where: { $0.id == activePresetID })?.name ?? baseName
 }
 
 package enum DialPresetSelectionAction: Equatable {
@@ -1088,6 +1088,8 @@ private struct DialDrawerPanel: View {
     @State private var focusedTextEntryID: String?
     @StateObject private var keyboardObserver = DialKeyboardObserver()
 
+    @ScaledMetric(relativeTo: .caption) private var preferredStripHeight: CGFloat = 78
+
     var body: some View {
         let width = dialResolvedDrawerWidth(containerWidth: containerSize.width)
         let keyboardOverlap = keyboardObserver.overlap
@@ -1114,7 +1116,11 @@ private struct DialDrawerPanel: View {
             mediumMaxHeight: maximumHeights.medium,
             tallMaxHeight: maximumHeights.tall
         )
-        let intrinsicHeight = dialDrawerChromeHeight(panelCount: panels.count) + measuredControlsContentHeight
+        let stripHeight = panel.presets.isEmpty ? 0 : preferredStripHeight
+        // When space is tight, scroll the strip with the controls so both stay reachable.
+        let pinsStrip = stripHeight > 0 && controlsHeightCap >= stripHeight + 44
+        let pinnedHeight = pinsStrip ? stripHeight : 0
+        let intrinsicHeight = dialDrawerChromeHeight(panelCount: panels.count) + pinnedHeight + measuredControlsContentHeight
         let resolvedHeight = dialResolvedDrawerHeight(
             presentation: effectivePresentation,
             intrinsicContentHeight: intrinsicHeight,
@@ -1143,7 +1149,9 @@ private struct DialDrawerPanel: View {
                 panel: panel,
                 toolbarBottomPadding: dialDrawerToolbarBottomPadding,
                 contentBottomPadding: dialDrawerContentInset,
-                maxControlsHeight: controlsHeightCap,
+                maxControlsHeight: controlsHeightCap - pinnedHeight,
+                versionStripHeight: stripHeight,
+                pinsVersionStrip: pinsStrip,
                 keyboardOverlap: keyboardOverlap,
                 textEntryBehavior: .drawer,
                 onFocusedTextEntryChanged: { newValue in
@@ -1171,10 +1179,12 @@ private struct DialDrawerPanel: View {
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .shadow(color: DialTheme.shadow, radius: 32, y: 8)
         .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .dialVersionCaptureBoundary()
         .offset(y: -dialResolvedKeyboardAvoidanceInset(keyboardOverlap: keyboardOverlap))
         .gesture(
             DragGesture(minimumDistance: 16)
                 .onEnded { gesture in
+                    guard abs(gesture.translation.height) > abs(gesture.translation.width) else { return }
                     onDrag(gesture.translation.height)
                 }
         )
@@ -1221,11 +1231,16 @@ private struct DialPanelControlsView: View {
     let toolbarBottomPadding: CGFloat
     let contentBottomPadding: CGFloat
     let maxControlsHeight: CGFloat?
+    let versionStripHeight: CGFloat
+    let pinsVersionStrip: Bool
     let keyboardOverlap: CGFloat
     let textEntryBehavior: DialTextEntryBehavior
     let onFocusedTextEntryChanged: ((String?) -> Void)?
     let onMeasuredControlsHeight: ((CGFloat) -> Void)?
 
+    @Environment(\.dialCaptureVersion) private var captureVersion
+    @State private var showsHistory = false
+    @State private var showsVersionSaveError = false
     @State private var copiedState = false
     @State private var measuredControlsContentHeight: CGFloat = 0
     @State private var focusedTextEntryID: String?
@@ -1235,6 +1250,8 @@ private struct DialPanelControlsView: View {
         toolbarBottomPadding: CGFloat = 8,
         contentBottomPadding: CGFloat = 12,
         maxControlsHeight: CGFloat? = nil,
+        versionStripHeight: CGFloat = 0,
+        pinsVersionStrip: Bool = false,
         keyboardOverlap: CGFloat = 0,
         textEntryBehavior: DialTextEntryBehavior = .standard,
         onFocusedTextEntryChanged: ((String?) -> Void)? = nil,
@@ -1244,28 +1261,16 @@ private struct DialPanelControlsView: View {
         self.toolbarBottomPadding = toolbarBottomPadding
         self.contentBottomPadding = contentBottomPadding
         self.maxControlsHeight = maxControlsHeight
+        self.versionStripHeight = versionStripHeight
+        self.pinsVersionStrip = pinsVersionStrip
         self.keyboardOverlap = keyboardOverlap
         self.textEntryBehavior = textEntryBehavior
         self.onFocusedTextEntryChanged = onFocusedTextEntryChanged
         self.onMeasuredControlsHeight = onMeasuredControlsHeight
     }
 
-    private var activePresetName: String {
-        dialActivePresetName(activePresetID: panel.activePresetID, presets: panel.presets)
-    }
-
-    private var presetSelection: Binding<UUID?> {
-        Binding(
-            get: { panel.activePresetID },
-            set: {
-                switch dialPresetSelectionAction(for: $0) {
-                case .clear:
-                    panel.clearActivePreset()
-                case let .load(id):
-                    panel.loadPreset(id: id)
-                }
-            }
-        )
+    private func captureCurrentVersion() {
+        if let data = captureVersion(panel.id) { panel.setThumbnail(data, for: panel.activePresetID) }
     }
 
     private var controlsShouldScroll: Bool {
@@ -1303,6 +1308,11 @@ private struct DialPanelControlsView: View {
                 toolbar
                     .padding(.horizontal, dialDrawerContentInset)
                     .padding(.bottom, toolbarBottomPadding)
+
+                if pinsVersionStrip {
+                    versionStrip
+                        .padding(.horizontal, dialDrawerContentInset)
+                }
 
                 controlsViewport
                     .background {
@@ -1365,6 +1375,13 @@ private struct DialPanelControlsView: View {
 
     private func controlsContent(bottomInset: CGFloat, measurement: Bool) -> some View {
         VStack(spacing: 6) {
+            if versionStripHeight > 0 && !pinsVersionStrip {
+                if measurement {
+                    Color.clear.frame(height: versionStripHeight)
+                } else {
+                    versionStrip
+                }
+            }
             controlList(panel.controls, measurement: measurement)
         }
         .padding(.horizontal, dialDrawerContentInset)
@@ -1385,54 +1402,63 @@ private struct DialPanelControlsView: View {
             .accessibilityHidden(true)
     }
 
+    private var versionStrip: some View {
+        DialVersionStrip(panel: panel, height: versionStripHeight, showsHistory: showsHistory,
+                         captureCurrent: captureCurrentVersion)
+            .id(panel.id)
+    }
+
     private var toolbar: some View {
         HStack(spacing: 6) {
             Button {
-                panel.savePreset(named: panel.nextPresetName)
+                captureCurrentVersion()
+                showsVersionSaveError = !panel.savePreset(named: panel.nextPresetName)
             } label: {
-                DialAddVersionIcon()
-                    .stroke(style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
-                    .frame(width: 18, height: 18)
-                    .foregroundStyle(DialTheme.textLabel)
-                    .frame(width: 36, height: 36)
-                    .background(DialRowBackground(cornerRadius: 8))
+                HStack(spacing: 8) {
+                    DialAddVersionIcon()
+                        .stroke(style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                        .frame(width: 18, height: 18)
+                    Text("Save version")
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(DialTheme.textLabel)
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .padding(.horizontal, 12)
+                .background(DialRowBackground(cornerRadius: 8))
+                .transaction { transaction in
+                    // Saving reveals the preview row while the button is released.
+                    // Keep the release animation from interpolating its new frame.
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                }
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Save \(panel.nextPresetName)")
-
-            Menu {
-                Picker("Preset", selection: presetSelection) {
-                    Text("Version 1")
-                        .tag(Optional<UUID>.none)
-
-                    ForEach(panel.presets) { preset in
-                        Text(preset.name)
-                            .tag(Optional(preset.id))
-                    }
-                }
-
-                if let activePresetID = panel.activePresetID {
-                    Divider()
-                    Button("Delete Current Preset", role: .destructive) {
-                        panel.deletePreset(id: activePresetID)
-                    }
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Text(activePresetName)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .opacity(0.6)
-                }
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(DialTheme.textLabel)
-                .frame(height: 36)
-                .padding(.horizontal, 12)
-                .background(DialRowBackground(cornerRadius: 8))
+            .alert("Couldn't Save Version", isPresented: $showsVersionSaveError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(panel.versionSaveError?.localizedDescription ?? "The model could not be copied.")
             }
-            .buttonStyle(.plain)
+
+            if !panel.presets.isEmpty {
+                Button {
+                    captureCurrentVersion()
+                    showsHistory = true
+                } label: {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(DialTheme.textLabel)
+                        .frame(width: 44, height: 44)
+                        .background(DialRowBackground(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Browse versions")
+                .accessibilityValue(dialActivePresetName(activePresetID: panel.activePresetID,
+                                                         presets: panel.presets, baseName: panel.baseVersionName))
+                .help("All versions (\(panel.versionItems.count))")
+            }
 
             Button {
                 copyTextToPasteboard(panel.copyInstructionText)
@@ -1448,12 +1474,13 @@ private struct DialPanelControlsView: View {
                         .font(.system(size: 13, weight: .medium))
                 }
                 .foregroundStyle(DialTheme.textLabel)
-                .frame(height: 36)
+                .frame(height: 44)
                 .padding(.horizontal, 12)
                 .background(DialRowBackground(cornerRadius: 8))
             }
             .buttonStyle(.plain)
         }
+        .sheet(isPresented: $showsHistory) { DialVersionHistory(panel: panel) }
     }
 
     private func controlList(_ controls: [DialResolvedControl], measurement: Bool) -> some View {

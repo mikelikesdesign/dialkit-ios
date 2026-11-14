@@ -478,15 +478,61 @@ DialPanelState(
 Public behavior:
 
 - `values`: the current tuned model
+- `updateValues(_:)`: commit programmatic edits, including changes inside reference models
 - `presets`: saved presets for that panel
 - `activePresetID`: currently loaded preset, if any
 - `controls`: the current control definitions
 - `configure(name:initial:controls:)`: update the control config at runtime
-- `savePreset(named:)`
+- `savePreset(named:)`: returns whether a new version was saved
+- `versionSaveError`: the last save failure, cleared after a successful save
 - `loadPreset(id:)`
 - `clearActivePreset()`
 - `deletePreset(id:)`
+- `renameVersion(id:name:)` (pass `nil` for the base)
 - `copyInstructionText()`
+
+For programmatic edits to a class model, or a struct containing class instances, use
+`updateValues` so DialKit publishes the change, invalidates the selected thumbnail,
+and saves the selected version when persistence is enabled:
+
+```swift
+dial.updateValues { values in
+    values.opacity = 0.3
+}
+```
+
+Each call commits the model and invalidates its preview. Direct in-place mutations
+such as `dial.values.opacity = 0.3` on a class, or edits through another reference to
+that object, cannot be observed automatically. Models containing only value types
+can continue to use direct property edits on `dial.values`.
+
+Saving a version copies the outgoing model so further edits belong to the new
+version. Models containing only value types are copied directly. For reference
+models, DialKit uses a `Codable` round-trip by default, including models encoded
+as a single scalar value.
+
+If a class or a nested reference has state excluded from `Codable`, supply
+`copyValues`. For example, if your model implements an independent `deepCopy()`:
+
+```swift
+let dial = DialPanelState(
+    name: "Card",
+    initial: CardModel(),
+    controls: CardModel.controls,
+    copyValues: { $0.deepCopy() }
+)
+```
+
+The copier must preserve every version-relevant property and independently copy
+every mutable reference, without modifying the original. It may throw if copying
+is unavailable. Use value-based `Equatable` that compares all version-relevant
+state. DialKit rejects copies that change those values or the configured control
+values: `savePreset` returns `false`, sets `versionSaveError`, and leaves the
+versions and selection intact. The built-in save button displays the error.
+
+`copyValues` preserves in-memory state; persistence still saves only properties
+included in `Codable`. Include a property in your encoding if it must survive
+an app restart.
 
 ### `DialStore`
 
@@ -584,16 +630,34 @@ struct MultiPreview: View {
 
 Drawer mode uses one shared drawer. If multiple panels are active, DialKit shows a picker in the drawer header and renders the selected panel. Inline mode renders all active panels in place.
 
-## Presets, Base State, and Copy
+## Iterations viewer
 
-Each panel supports in-memory presets.
+Tap **Save version** (the plus icon) to fork the current values and start editing the new version. As soon as the drawer has two versions, a horizontal row of thumbnails appears beneath the toolbar. Tap a thumbnail to switch and keep tuning. Swipe sideways to reach more versions.
 
-- When no preset is selected, edits update the panel's base values.
-- When a preset is active, edits automatically update that preset.
-- `clearActivePreset()` restores the current base values.
-- `copyInstructionText()` returns a prompt block plus JSON, not raw JSON alone.
+With only the base version, the toolbar shows **Save version** and **Copy**. Once there are two or more versions, a separate grid button appears in both drawer and inline mode. Tap it to open the full gallery. The iPhone sheet opens partway so you can still see the running app. Drag up for more room, or tap a thumbnail to load it and return to the editor. Closing or swiping down leaves the selection alone.
 
-The built-in UI already exposes preset save/load/delete and copy actions.
+**V1** is the editable base. New saves default to **V2**, **V3**, and so on. Older saved names like **Version 3** count toward the next number. Changes belong to the selected version. Use a card’s **…** menu or long-press to rename it or delete a saved version. The base can be renamed but cannot be deleted; deleting the selected version restores the base. **Copy** still copies the active values and the instruction to apply them as defaults.
+
+On iOS, DialKit captures the exposed area of the app above or below the editor when you save, switch from the strip, or open Versions. The strip also refreshes the active thumbnail after edits settle. Previews come from the editor’s own window. If no preview is available, the version still works. To focus every thumbnail on a particular design, supply a sized SwiftUI view on `DialRoot`:
+
+```swift
+DialRoot()
+    .dialVersionPreview(for: dial) { values in
+        CardArtwork(values: values)
+            .frame(width: 360, height: 240)
+    }
+```
+
+Versions stay in memory by default. To restore values, names, the selected version, and available previews on the next launch, give the panel a stable `persistKey`. Use a different key for each panel and model schema.
+
+```swift
+let dial = DialPanelState(
+    name: "Card",
+    initial: CardModel(),
+    controls: CardModel.controls,
+    persistKey: "card-study"
+)
+```
 
 ## Actions
 
@@ -719,6 +783,6 @@ When you reconfigure a panel:
 - Optional draggable FAB with persisted position per `storageID`
 - Mobile drawer presentation plus inline presentation
 - Content-sized iPhone drawer with medium/tall drag states and shared multi-panel picker
-- Presets with base-state restore and active-preset autosave
+- Iterations viewer with an editable base, preview gallery, and optional persistence
 - Built-in copy action, color picker, tap-to-edit sliders, drag guide marks, and slider step haptics
 - Nested groups, spring controls, transition controls, actions, text, toggle, color, select, and slider controls

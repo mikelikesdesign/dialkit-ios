@@ -328,8 +328,8 @@ final class DialKitTests: XCTestCase {
         XCTAssertEqual(dialDrawerContentInset, 12)
         XCTAssertEqual(dialDrawerHorizontalInset, 8)
         XCTAssertEqual(dialDrawerToolbarBottomPadding, 6)
-        XCTAssertEqual(dialDrawerChromeHeight(panelCount: 1), 69)
-        XCTAssertEqual(dialDrawerChromeHeight(panelCount: 2), 109)
+        XCTAssertEqual(dialDrawerChromeHeight(panelCount: 1), 77)
+        XCTAssertEqual(dialDrawerChromeHeight(panelCount: 2), 117)
     }
 
     func testResolvedDrawerWidthUsesSingleOuterInsetPerSide() {
@@ -509,21 +509,21 @@ final class DialKitTests: XCTestCase {
     }
 
     func testActivePresetNameFallsBackToVersionOneWhenNoPresetIsSelected() {
-        let first = DialPresetSummary(id: UUID(), name: "Version 2")
+        let first = DialPresetSummary(id: UUID(), name: "V2")
 
         XCTAssertEqual(
             dialActivePresetName(activePresetID: nil, presets: [first]),
-            "Version 1"
+            "V1"
         )
     }
 
     func testActivePresetNameUsesSelectedPresetName() {
-        let first = DialPresetSummary(id: UUID(), name: "Version 2")
-        let second = DialPresetSummary(id: UUID(), name: "Version 3")
+        let first = DialPresetSummary(id: UUID(), name: "V2")
+        let second = DialPresetSummary(id: UUID(), name: "V3")
 
         XCTAssertEqual(
             dialActivePresetName(activePresetID: second.id, presets: [first, second]),
-            "Version 3"
+            "V3"
         )
     }
 
@@ -733,7 +733,7 @@ final class DialKitTests: XCTestCase {
                 mediumMaxHeight: 360,
                 tallMaxHeight: 620
             ),
-            291
+            283
         )
         XCTAssertEqual(
             dialDrawerControlsHeightCap(
@@ -742,7 +742,7 @@ final class DialKitTests: XCTestCase {
                 mediumMaxHeight: 360,
                 tallMaxHeight: 620
             ),
-            511
+            503
         )
     }
 

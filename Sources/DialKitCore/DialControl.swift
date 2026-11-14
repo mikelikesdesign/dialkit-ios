@@ -358,6 +358,28 @@ public struct DialControl<Model> {
 }
 
 package extension DialControlNode where Model: Codable & Equatable {
+    /// Capture control values independently of the model's reference graph.
+    func valueMatcher(for model: Model) -> (Model) -> Bool {
+        func capture<Value: Equatable>(_ getter: @escaping (Model) -> Value) -> (Model) -> Bool {
+            let previous = getter(model)
+            return { getter($0) == previous }
+        }
+
+        switch self {
+        case let .slider(_, _, _, _, _, getter, _): return capture(getter)
+        case let .toggle(_, _, getter, _): return capture(getter)
+        case let .text(_, _, _, getter, _): return capture(getter)
+        case let .color(_, _, getter, _): return capture(getter)
+        case let .select(_, _, _, getter, _): return capture(getter)
+        case let .spring(_, _, getter, _): return capture(getter)
+        case let .transition(_, _, getter, _): return capture(getter)
+        case let .group(_, _, _, children):
+            let matches = children.map { $0.valueMatcher(for: model) }
+            return { current in matches.allSatisfy { $0(current) } }
+        case .action: return { _ in true }
+        }
+    }
+
     func normalize(current: inout Model, fallback: Model) {
         switch self {
         case let .slider(_, _, range, step, _, getter, setter):
@@ -408,9 +430,8 @@ package extension DialControlNode where Model: Codable & Equatable {
                             unit: unit,
                             get: { getter(state.values) },
                             set: { newValue in
-                                var updated = state.values
-                                setter(&updated, dialRound(newValue, step: step, within: range))
-                                state.values = updated
+                                state.updateControlValue(dialRound(newValue, step: step, within: range),
+                                                         getter: getter, setter: setter)
                             }
                         )
                     )
@@ -426,9 +447,7 @@ package extension DialControlNode where Model: Codable & Equatable {
                         DialResolvedToggle(
                             get: { getter(state.values) },
                             set: { newValue in
-                                var updated = state.values
-                                setter(&updated, newValue)
-                                state.values = updated
+                                state.updateControlValue(newValue, getter: getter, setter: setter)
                             }
                         )
                     )
@@ -445,9 +464,7 @@ package extension DialControlNode where Model: Codable & Equatable {
                             placeholder: placeholder,
                             get: { getter(state.values) },
                             set: { newValue in
-                                var updated = state.values
-                                setter(&updated, newValue)
-                                state.values = updated
+                                state.updateControlValue(newValue, getter: getter, setter: setter)
                             }
                         )
                     )
@@ -463,9 +480,7 @@ package extension DialControlNode where Model: Codable & Equatable {
                         DialResolvedColor(
                             get: { getter(state.values) },
                             set: { newValue in
-                                var updated = state.values
-                                setter(&updated, newValue)
-                                state.values = updated
+                                state.updateControlValue(newValue, getter: getter, setter: setter)
                             }
                         )
                     )
@@ -482,9 +497,7 @@ package extension DialControlNode where Model: Codable & Equatable {
                             options: options,
                             get: { getter(state.values) },
                             set: { newValue in
-                                var updated = state.values
-                                setter(&updated, newValue)
-                                state.values = updated
+                                state.updateControlValue(newValue, getter: getter, setter: setter)
                             }
                         )
                     )
@@ -500,9 +513,7 @@ package extension DialControlNode where Model: Codable & Equatable {
                         DialResolvedSpring(
                             get: { getter(state.values) },
                             set: { newValue in
-                                var updated = state.values
-                                setter(&updated, newValue)
-                                state.values = updated
+                                state.updateControlValue(newValue, getter: getter, setter: setter)
                             }
                         )
                     )
@@ -518,9 +529,7 @@ package extension DialControlNode where Model: Codable & Equatable {
                         DialResolvedTransition(
                             get: { getter(state.values) },
                             set: { newValue in
-                                var updated = state.values
-                                setter(&updated, newValue)
-                                state.values = updated
+                                state.updateControlValue(newValue, getter: getter, setter: setter)
                             }
                         )
                     )

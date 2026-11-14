@@ -62,6 +62,7 @@ public struct DialRoot: View {
                         DialPanelContainer(panel: panel, defaultOpen: true, inline: true)
                     }
                 }
+                .dialVersionCaptureBoundary()
             } else {
                 DialDrawerHost(
                     store: store,
